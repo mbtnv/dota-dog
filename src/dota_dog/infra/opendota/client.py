@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
@@ -13,6 +14,16 @@ from dota_dog.infra.opendota.schemas import (
     OpenDotaProfileResponse,
     OpenDotaRecentMatch,
 )
+
+
+@dataclass(slots=True, frozen=True)
+class OpenDotaRateLimitSnapshot:
+    server_time: datetime | None
+    remaining_minute: int | None
+    limit_minute: int | None
+    remaining_day: int | None
+    limit_day: int | None
+    recommended_pause_seconds: float
 
 
 class OpenDotaClient:
@@ -30,6 +41,7 @@ class OpenDotaClient:
         self._backoff_seconds = backoff_seconds
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=20.0)
         self._next_request_at_monotonic = 0.0
+        self._last_rate_limit_snapshot: OpenDotaRateLimitSnapshot | None = None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -97,6 +109,11 @@ class OpenDotaClient:
             if isinstance(item, dict)
         ]
 
+    async def get_rate_limits(self, *, refresh: bool = False) -> OpenDotaRateLimitSnapshot | None:
+        if refresh or self._last_rate_limit_snapshot is None:
+            await self.get_constants_resource("lobby_type")
+        return self._last_rate_limit_snapshot
+
     def _request_params(self) -> dict[str, str]:
         if not self._api_key:
             return {}
@@ -107,14 +124,16 @@ class OpenDotaClient:
             await self._wait_for_rate_limit_window()
             try:
                 response = await self._client.get(path, params=params or self._request_params())
-                self._schedule_rate_limit_pause(self._rate_limit_delay_seconds(response.headers))
+                self._update_rate_limit_snapshot(response.headers)
                 response.raise_for_status()
                 return response
             except (httpx.RequestError, httpx.HTTPStatusError) as exc:
                 header_delay = 0.0
                 if isinstance(exc, httpx.HTTPStatusError):
-                    header_delay = self._rate_limit_delay_seconds(exc.response.headers)
-                    self._schedule_rate_limit_pause(header_delay)
+                    snapshot = self._update_rate_limit_snapshot(exc.response.headers)
+                    header_delay = (
+                        snapshot.recommended_pause_seconds if snapshot is not None else 0.0
+                    )
                 if not self._should_retry(exc) or attempt == self._max_retries:
                     raise
                 await asyncio.sleep(max(self._backoff_seconds * attempt, header_delay))
@@ -139,6 +158,42 @@ class OpenDotaClient:
         self._next_request_at_monotonic = max(
             self._next_request_at_monotonic,
             time.monotonic() + delay_seconds,
+        )
+
+    def _update_rate_limit_snapshot(
+        self, headers: httpx.Headers
+    ) -> OpenDotaRateLimitSnapshot | None:
+        snapshot = self._build_rate_limit_snapshot(headers)
+        if snapshot is None:
+            return None
+        self._last_rate_limit_snapshot = snapshot
+        self._schedule_rate_limit_pause(snapshot.recommended_pause_seconds)
+        return snapshot
+
+    @classmethod
+    def _build_rate_limit_snapshot(
+        cls, headers: httpx.Headers
+    ) -> OpenDotaRateLimitSnapshot | None:
+        server_time = cls._parse_server_time(headers)
+        remaining_minute = cls._parse_int_header(headers, "x-rate-limit-remaining-minute")
+        limit_minute = cls._parse_int_header(headers, "x-rate-limit-limit-minute")
+        remaining_day = cls._parse_int_header(headers, "x-rate-limit-remaining-day")
+        limit_day = cls._parse_int_header(headers, "x-rate-limit-limit-day")
+        if (
+            server_time is None
+            and remaining_minute is None
+            and limit_minute is None
+            and remaining_day is None
+            and limit_day is None
+        ):
+            return None
+        return OpenDotaRateLimitSnapshot(
+            server_time=server_time,
+            remaining_minute=remaining_minute,
+            limit_minute=limit_minute,
+            remaining_day=remaining_day,
+            limit_day=limit_day,
+            recommended_pause_seconds=cls._rate_limit_delay_seconds(headers),
         )
 
     @classmethod

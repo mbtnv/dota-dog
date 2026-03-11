@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from dota_dog.bot.handlers.common import (
     HandlerDependencies,
     help_handler,
+    limits_handler,
     report_handler,
     resync_handler,
     track_handler,
@@ -22,6 +23,7 @@ from dota_dog.infra.db.repositories.core import (
     TopicPlayerRepository,
     TopicRepository,
 )
+from dota_dog.infra.opendota.client import OpenDotaRateLimitSnapshot
 from dota_dog.infra.opendota.schemas import OpenDotaProfileResponse
 from dota_dog.services.backfill import BackfillService
 from dota_dog.services.constants import ConstantsService
@@ -32,6 +34,16 @@ from dota_dog.services.tracking import TrackingService
 
 
 class FakeOpenDotaClient:
+    def __init__(self) -> None:
+        self.rate_limits = OpenDotaRateLimitSnapshot(
+            server_time=datetime(2026, 3, 11, 8, 1, 54, tzinfo=UTC),
+            remaining_minute=2,
+            limit_minute=60,
+            remaining_day=2744,
+            limit_day=30000,
+            recommended_pause_seconds=3.0,
+        )
+
     async def get_profile(self, account_id: int) -> OpenDotaProfileResponse:
         return OpenDotaProfileResponse.model_validate(
             {
@@ -58,6 +70,9 @@ class FakeOpenDotaClient:
 
     async def get_match_players(self, match_id: int) -> list[object]:
         return []
+
+    async def get_rate_limits(self, *, refresh: bool = False) -> OpenDotaRateLimitSnapshot | None:
+        return self.rate_limits
 
 
 class FailingOpenDotaClient(FakeOpenDotaClient):
@@ -136,9 +151,31 @@ async def test_help_handler_lists_available_commands() -> None:
     help_text = message.answers[0][0]
     assert "Доступные команды:" in help_text
     assert "/help - Показывает этот список команд." in help_text
+    assert "/limits - Показывает текущие лимиты запросов к OpenDota API." in help_text
+    assert "Команды для группы или topic:" in help_text
     assert "/players - Показывает список отслеживаемых игроков" in help_text
     assert "/track <account_id|profile_url> [alias]" in help_text
     assert "Для админов чата или разрешенных пользователей:" in help_text
+
+
+@pytest.mark.asyncio
+async def test_limits_handler_returns_current_rate_limits() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/limits", chat_type="private")
+
+    await limits_handler(message, deps)
+
+    assert len(message.answers) == 1
+    limits_text = message.answers[0][0]
+    assert "Лимиты OpenDota API:" in limits_text
+    assert "Обновлено: 2026-03-11 08:01 UTC" in limits_text
+    assert "В минуту: 2/60" in limits_text
+    assert "В день: 2744/30000" in limits_text
+    assert "Рекомендуемая пауза: 3.0 сек." in limits_text
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

@@ -31,8 +31,11 @@ from dota_dog.services.reporting import ReportingService
 router = Router()
 logger = logging.getLogger(__name__)
 
-PUBLIC_COMMANDS: tuple[tuple[str, str], ...] = (
+GLOBAL_COMMANDS: tuple[tuple[str, str], ...] = (
     ("/help", "Показывает этот список команд."),
+    ("/limits", "Показывает текущие лимиты запросов к OpenDota API."),
+)
+TOPIC_COMMANDS: tuple[tuple[str, str], ...] = (
     ("/players", "Показывает список отслеживаемых игроков в текущем topic."),
     (
         "/status",
@@ -127,11 +130,17 @@ def _parse_account_id(raw_value: str) -> int | None:
 def _build_help_text() -> str:
     lines = [
         "Доступные команды:",
-        "Все команды, кроме /help, работают только в группе или topic.",
         "",
-        "Для всех пользователей:",
+        "Глобальные команды:",
     ]
-    lines.extend(f"{command} - {description}" for command, description in PUBLIC_COMMANDS)
+    lines.extend(f"{command} - {description}" for command, description in GLOBAL_COMMANDS)
+    lines.extend(
+        [
+            "",
+            "Команды для группы или topic:",
+        ]
+    )
+    lines.extend(f"{command} - {description}" for command, description in TOPIC_COMMANDS)
     lines.extend(
         [
             "",
@@ -139,6 +148,34 @@ def _build_help_text() -> str:
         ]
     )
     lines.extend(f"{command} - {description}" for command, description in MANAGE_COMMANDS)
+    return "\n".join(lines)
+
+
+def _format_limits_text(
+    *,
+    updated_at: datetime | None,
+    remaining_minute: int | None,
+    limit_minute: int | None,
+    remaining_day: int | None,
+    limit_day: int | None,
+    recommended_pause_seconds: float,
+) -> str:
+    def format_bucket(remaining: int | None, total: int | None) -> str:
+        if remaining is None and total is None:
+            return "нет данных"
+        if remaining is None:
+            return f"лимит {total}"
+        if total is None:
+            return f"осталось {remaining}"
+        return f"{remaining}/{total}"
+
+    lines = [
+        "Лимиты OpenDota API:",
+        f"Обновлено: {_fmt_dt(updated_at)}",
+        f"В минуту: {format_bucket(remaining_minute, limit_minute)}",
+        f"В день: {format_bucket(remaining_day, limit_day)}",
+        f"Рекомендуемая пауза: {recommended_pause_seconds:.1f} сек.",
+    ]
     return "\n".join(lines)
 
 
@@ -160,6 +197,24 @@ async def _require_manage_permission(message: Message, deps: HandlerDependencies
 @router.message(Command("help"))
 async def help_handler(message: Message) -> None:
     await message.answer(_build_help_text())
+
+
+@router.message(Command("limits"))
+async def limits_handler(message: Message, deps: HandlerDependencies) -> None:
+    snapshot = await deps.opendota_client.get_rate_limits(refresh=True)
+    if snapshot is None:
+        await message.answer("OpenDota не вернул headers с лимитами запросов.")
+        return
+    await message.answer(
+        _format_limits_text(
+            updated_at=snapshot.server_time,
+            remaining_minute=snapshot.remaining_minute,
+            limit_minute=snapshot.limit_minute,
+            remaining_day=snapshot.remaining_day,
+            limit_day=snapshot.limit_day,
+            recommended_pause_seconds=snapshot.recommended_pause_seconds,
+        )
+    )
 
 
 @router.message(Command("players"))

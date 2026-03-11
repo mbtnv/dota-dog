@@ -47,6 +47,7 @@ Telegram-бот и `worker` для отслеживания матчей Dota 2 
 
 ```text
 /help
+/limits
 /track 123456789 mid
 /track https://www.dotabuff.com/players/987654321 carry
 /players
@@ -60,6 +61,7 @@ Telegram-бот и `worker` для отслеживания матчей Dota 2 
 | Команда | Что делает |
 | --- | --- |
 | `/help` | Показывает список доступных команд и краткую справку по ним. |
+| `/limits` | Показывает текущие лимиты запросов к OpenDota API. |
 | `/track <account_id\|profile_url> [alias]` | Добавляет игрока в текущий chat/topic. |
 | `/untrack <account_id\|alias>` | Удаляет игрока из текущего chat/topic. |
 | `/players` | Показывает список отслеживаемых игроков в текущем topic. |
