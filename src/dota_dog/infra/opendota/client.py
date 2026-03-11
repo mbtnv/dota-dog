@@ -171,9 +171,7 @@ class OpenDotaClient:
         return snapshot
 
     @classmethod
-    def _build_rate_limit_snapshot(
-        cls, headers: httpx.Headers
-    ) -> OpenDotaRateLimitSnapshot | None:
+    def _build_rate_limit_snapshot(cls, headers: httpx.Headers) -> OpenDotaRateLimitSnapshot | None:
         server_time = cls._parse_server_time(headers)
         remaining_minute = cls._parse_int_header(headers, "x-rate-limit-remaining-minute")
         limit_minute = cls._parse_int_header(headers, "x-rate-limit-limit-minute")

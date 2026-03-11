@@ -128,7 +128,7 @@ def _make_deps_with_client(
     tracking_service = TrackingService()
     return HandlerDependencies(
         session_factory=session_factory,
-        opendota_client=client,  # type: ignore[arg-type]
+        opendota_client=client,
         reporting_service=ReportingService(),
         formatter=MessageFormatter(),
         constants_service=ConstantsService(sync_interval_hours=24),

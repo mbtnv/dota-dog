@@ -1,0 +1,98 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen --dev
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Run linter
+        run: uv run ruff check .
+
+      - name: Run type checks
+        run: uv run ty check
+
+      - name: Run test suite
+        run: uv run pytest
+
+  deploy:
+    name: Deploy to production
+    runs-on:
+      - self-hosted
+      - linux
+      - prod
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      COMPOSE_PROJECT_NAME: dota-dog
+      PROD_ENV_FILE: /opt/dota-dog/stack.env
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build application image
+        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" build bot
+
+      - name: Start database
+        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" up -d db
+
+      - name: Wait for database
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "${PROD_ENV_FILE}"
+          for attempt in {1..30}; do
+            if docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" exec -T db \
+              pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Database is not ready in time" >&2
+          exit 1
+
+      - name: Run migrations
+        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" run --rm migrate
+
+      - name: Restart bot and worker
+        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" up -d bot worker
+
+      - name: Show service status
+        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" ps

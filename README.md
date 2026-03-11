@@ -131,6 +131,16 @@ docker compose up --build
 - `DATABASE_URL` в `stack.env` не нужен, в `docker-compose.portainer.yml` он собирается автоматически из `POSTGRES_DB`, `POSTGRES_USER` и `POSTGRES_PASSWORD`;
 - `OPENDOTA_API_KEY` можно оставить пустым, если ключ не используется.
 
+### GitHub Actions + self-hosted runner
+
+Для автоматического деплоя на домашний сервер используйте:
+
+- [`docker-compose.prod.yml`](docker-compose.prod.yml) как production compose;
+- [`stack.prod.env.example`](stack.prod.env.example) как шаблон env-файла для сервера;
+- workflow [`CI/CD`](.github/workflows/ci-cd.yml) для проверок на GitHub и сборки/deploy через self-hosted runner.
+
+Подробная инструкция по настройке GitHub, runner и сервера есть в [`docs/self-hosted-runner-deploy.md`](docs/self-hosted-runner-deploy.md).
+
 ### Локальный запуск без Docker
 
 Если Postgres работает локально, поменяйте `DATABASE_URL`, например:

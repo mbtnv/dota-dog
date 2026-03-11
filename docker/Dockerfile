@@ -17,7 +17,7 @@ FROM base AS builder
 COPY pyproject.toml uv.lock README.md alembic.ini ./
 COPY src ./src
 
-RUN uv sync --no-dev
+RUN uv sync --frozen --no-dev
 
 FROM base AS runtime
 

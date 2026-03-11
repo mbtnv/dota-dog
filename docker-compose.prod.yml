@@ -1,0 +1,75 @@
+x-app-service: &app-service
+  image: dota-dog-app:prod
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  environment:
+    BOT_TOKEN: ${BOT_TOKEN}
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dota_dog}:${POSTGRES_PASSWORD:-dota_dog}@db:5432/${POSTGRES_DB:-dota_dog}
+    OPENDOTA_BASE_URL: ${OPENDOTA_BASE_URL:-https://api.opendota.com/api}
+    OPENDOTA_API_KEY: ${OPENDOTA_API_KEY:-}
+    POLL_INTERVAL_MINUTES: ${POLL_INTERVAL_MINUTES:-15}
+    DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Moscow}
+    ALLOWED_TELEGRAM_USER_IDS: ${ALLOWED_TELEGRAM_USER_IDS:-}
+    TELEGRAM_ADMIN_CHECK_ENABLED: ${TELEGRAM_ADMIN_CHECK_ENABLED:-true}
+    OPENDOTA_MAX_RETRIES: ${OPENDOTA_MAX_RETRIES:-3}
+    TELEGRAM_SEND_MAX_RETRIES: ${TELEGRAM_SEND_MAX_RETRIES:-3}
+    RETRY_BACKOFF_SECONDS: ${RETRY_BACKOFF_SECONDS:-1.0}
+    CONSTANTS_SYNC_INTERVAL_HOURS: ${CONSTANTS_SYNC_INTERVAL_HOURS:-24}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dota_dog}
+      POSTGRES_USER: ${POSTGRES_USER:-dota_dog}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dota_dog}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-dota_dog} -d ${POSTGRES_DB:-dota_dog}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    <<: *app-service
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bot:
+    <<: *app-service
+    command: ["uv", "run", "python", "-m", "dota_dog.app"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-m", "dota_dog.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    <<: *app-service
+    command: ["uv", "run", "python", "-m", "dota_dog.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-m", "dota_dog.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:

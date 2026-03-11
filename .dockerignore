@@ -1,0 +1,15 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+.DS_Store
+docs
+old_code
+tests
+.env
+stack.env
+stack.prod.env.example
+docker-compose.portainer.yml
+docker-compose.prod.yml
+docker-compose.yml

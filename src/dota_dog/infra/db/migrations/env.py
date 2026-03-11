@@ -58,7 +58,7 @@ def _run_sync_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    url = config.get_main_option("sqlalchemy.url") or ""
     if "+asyncpg" in url or "+aiosqlite" in url:
         asyncio.run(_run_async_migrations())
         return

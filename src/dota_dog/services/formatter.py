@@ -108,9 +108,7 @@ class MessageFormatter:
         header = f"<b>{escape(title)}</b>"
         if not items:
             return f"{header}\nNo matches."
-        body = "\n\n".join(
-            self._format_recent_match_group(group, constants) for group in items
-        )
+        body = "\n\n".join(self._format_recent_match_group(group, constants) for group in items)
         return f"{header}\n\n{body}"
 
     def format_leaderboard(self, title: str, summaries: list[ReportSummary]) -> str:
@@ -164,9 +162,7 @@ class MessageFormatter:
                 f"GPM/XPM: {match.gpm}/{match.xpm} | "
                 f"Last hits: {match.last_hits}"
             )
-            parts.append(
-                f"HD/TD/HH: {match.hero_damage}/{match.tower_damage}/{match.hero_healing}"
-            )
+            parts.append(f"HD/TD/HH: {match.hero_damage}/{match.tower_damage}/{match.hero_healing}")
         parts.append(f'<a href="{dotabuff_match_url(first_match.match_id)}">Dotabuff</a>')
         return "\n".join(parts)
 
