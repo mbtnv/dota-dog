@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from dota_dog.bot.handlers.common import (
     HandlerDependencies,
+    help_handler,
     report_handler,
     resync_handler,
     track_handler,
@@ -123,6 +124,21 @@ def _make_deps_with_client(
         poll_interval_minutes=15,
         default_timezone="UTC",
     )
+
+
+@pytest.mark.asyncio
+async def test_help_handler_lists_available_commands() -> None:
+    message = FakeMessage(text="/help", chat_type="private")
+
+    await help_handler(message)
+
+    assert len(message.answers) == 1
+    help_text = message.answers[0][0]
+    assert "Доступные команды:" in help_text
+    assert "/help - Показывает этот список команд." in help_text
+    assert "/players - Показывает список отслеживаемых игроков" in help_text
+    assert "/track <account_id|profile_url> [alias]" in help_text
+    assert "Для админов чата или разрешенных пользователей:" in help_text
 
 
 @pytest.mark.asyncio

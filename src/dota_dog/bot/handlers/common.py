@@ -31,6 +31,41 @@ from dota_dog.services.reporting import ReportingService
 router = Router()
 logger = logging.getLogger(__name__)
 
+PUBLIC_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("/help", "Показывает этот список команд."),
+    ("/players", "Показывает список отслеживаемых игроков в текущем topic."),
+    (
+        "/status",
+        "Показывает статус topic: игроков, таймзону, паузу и состояние последнего опроса.",
+    ),
+    (
+        "/report <day|week|month> [account_id|alias]",
+        "Строит отчет по всем игрокам topic или по одному игроку.",
+    ),
+    (
+        "/last [n] [account_id|alias]",
+        "Показывает последние матчи из БД. По умолчанию 5, максимум 10.",
+    ),
+    (
+        "/leaders <day|week|month>",
+        "Показывает мини-лидерборд по винрейту и победам за период.",
+    ),
+)
+MANAGE_COMMANDS: tuple[tuple[str, str], ...] = (
+    (
+        "/track <account_id|profile_url> [alias]",
+        "Добавляет игрока в текущий chat/topic.",
+    ),
+    ("/untrack <account_id|alias>", "Удаляет игрока из текущего chat/topic."),
+    ("/set_timezone <TZ>", "Меняет таймзону topic, например Europe/Moscow."),
+    ("/pause", "Ставит realtime-уведомления topic на паузу."),
+    ("/resume", "Возобновляет realtime-уведомления topic."),
+    (
+        "/resync [days] [account_id|alias]",
+        "Добирает историю матчей из OpenDota за последние N дней. По умолчанию 7.",
+    ),
+)
+
 
 @dataclass(slots=True)
 class HandlerDependencies:
@@ -89,6 +124,24 @@ def _parse_account_id(raw_value: str) -> int | None:
     return None
 
 
+def _build_help_text() -> str:
+    lines = [
+        "Доступные команды:",
+        "Все команды, кроме /help, работают только в группе или topic.",
+        "",
+        "Для всех пользователей:",
+    ]
+    lines.extend(f"{command} - {description}" for command, description in PUBLIC_COMMANDS)
+    lines.extend(
+        [
+            "",
+            "Для админов чата или разрешенных пользователей:",
+        ]
+    )
+    lines.extend(f"{command} - {description}" for command, description in MANAGE_COMMANDS)
+    return "\n".join(lines)
+
+
 async def _require_manage_permission(message: Message, deps: HandlerDependencies) -> bool:
     if message.bot is None:
         await message.answer("Bot context is unavailable.")
@@ -102,6 +155,11 @@ async def _require_manage_permission(message: Message, deps: HandlerDependencies
         return True
     await message.answer("Команда доступна только админам чата или разрешенным пользователям.")
     return False
+
+
+@router.message(Command("help"))
+async def help_handler(message: Message) -> None:
+    await message.answer(_build_help_text())
 
 
 @router.message(Command("players"))
