@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -26,6 +29,7 @@ class OpenDotaClient:
         self._max_retries = max_retries
         self._backoff_seconds = backoff_seconds
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=20.0)
+        self._next_request_at_monotonic = 0.0
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -100,14 +104,20 @@ class OpenDotaClient:
 
     async def _request(self, path: str, params: dict[str, str] | None = None) -> httpx.Response:
         for attempt in range(1, self._max_retries + 1):
+            await self._wait_for_rate_limit_window()
             try:
                 response = await self._client.get(path, params=params or self._request_params())
+                self._schedule_rate_limit_pause(self._rate_limit_delay_seconds(response.headers))
                 response.raise_for_status()
                 return response
             except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                header_delay = 0.0
+                if isinstance(exc, httpx.HTTPStatusError):
+                    header_delay = self._rate_limit_delay_seconds(exc.response.headers)
+                    self._schedule_rate_limit_pause(header_delay)
                 if not self._should_retry(exc) or attempt == self._max_retries:
                     raise
-                await asyncio.sleep(self._backoff_seconds * attempt)
+                await asyncio.sleep(max(self._backoff_seconds * attempt, header_delay))
         msg = "OpenDota request retry loop exhausted"
         raise RuntimeError(msg)
 
@@ -117,3 +127,66 @@ class OpenDotaClient:
             return True
         status_code = exc.response.status_code
         return status_code == 429 or status_code >= 500
+
+    async def _wait_for_rate_limit_window(self) -> None:
+        delay = self._next_request_at_monotonic - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    def _schedule_rate_limit_pause(self, delay_seconds: float) -> None:
+        if delay_seconds <= 0:
+            return
+        self._next_request_at_monotonic = max(
+            self._next_request_at_monotonic,
+            time.monotonic() + delay_seconds,
+        )
+
+    @classmethod
+    def _rate_limit_delay_seconds(cls, headers: httpx.Headers) -> float:
+        server_time = cls._parse_server_time(headers)
+        if server_time is None:
+            return 0.0
+        remaining_minute = cls._parse_int_header(headers, "x-rate-limit-remaining-minute")
+        remaining_day = cls._parse_int_header(headers, "x-rate-limit-remaining-day")
+        delay = 0.0
+        if remaining_minute is not None:
+            next_minute = server_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            seconds_to_next_minute = max((next_minute - server_time).total_seconds(), 1.0)
+            if remaining_minute <= 0:
+                delay = max(delay, seconds_to_next_minute)
+            elif remaining_minute < 10:
+                delay = max(delay, seconds_to_next_minute / remaining_minute)
+        if remaining_day is not None and remaining_day < 100:
+            utc_time = server_time.astimezone(UTC)
+            next_day = utc_time.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+                days=1
+            )
+            seconds_to_next_day = max((next_day - utc_time).total_seconds(), 1.0)
+            if remaining_day <= 0:
+                delay = max(delay, seconds_to_next_day)
+            else:
+                delay = max(delay, seconds_to_next_day / remaining_day)
+        return delay
+
+    @staticmethod
+    def _parse_int_header(headers: httpx.Headers, name: str) -> int | None:
+        raw_value = headers.get(name)
+        if raw_value is None:
+            return None
+        try:
+            return int(raw_value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_server_time(headers: httpx.Headers) -> datetime | None:
+        raw_value = headers.get("date")
+        if raw_value is None:
+            return None
+        try:
+            parsed = parsedate_to_datetime(raw_value)
+        except (TypeError, ValueError, IndexError):
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed
