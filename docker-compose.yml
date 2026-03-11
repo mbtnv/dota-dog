@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: dota_dog
+      POSTGRES_USER: dota_dog
+      POSTGRES_PASSWORD: dota_dog
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dota_dog -d dota_dog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    command: ["uv", "run", "python", "-m", "dota_dog.app"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-m", "dota_dog.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    command: ["uv", "run", "python", "-m", "dota_dog.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-m", "dota_dog.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
