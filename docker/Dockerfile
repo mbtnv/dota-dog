@@ -23,4 +23,4 @@ FROM base AS runtime
 
 COPY --from=builder /app /app
 
-CMD ["uv", "run", "python", "-m", "dota_dog.app"]
+CMD ["/app/.venv/bin/python3", "-m", "dota_dog.app"]

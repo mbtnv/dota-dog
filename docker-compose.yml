@@ -19,7 +19,7 @@ services:
       dockerfile: docker/Dockerfile
     env_file:
       - .env
-    command: ["uv", "run", "alembic", "upgrade", "head"]
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
     depends_on:
       db:
         condition: service_healthy
@@ -30,16 +30,11 @@ services:
       dockerfile: docker/Dockerfile
     env_file:
       - .env
-    command: ["uv", "run", "python", "-m", "dota_dog.app"]
+    command: ["/app/.venv/bin/python3", "-m", "dota_dog.app"]
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "uv", "run", "python", "-m", "dota_dog.healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   worker:
     build:
@@ -47,16 +42,11 @@ services:
       dockerfile: docker/Dockerfile
     env_file:
       - .env
-    command: ["uv", "run", "python", "-m", "dota_dog.worker"]
+    command: ["/app/.venv/bin/python3", "-m", "dota_dog.worker"]
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "uv", "run", "python", "-m", "dota_dog.healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
 volumes:
   postgres_data:
