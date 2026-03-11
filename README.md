@@ -135,9 +135,8 @@ docker compose up --build
 
 Для автоматического деплоя на домашний сервер используйте:
 
-- [`docker-compose.prod.yml`](docker-compose.prod.yml) как production compose;
-- [`stack.prod.env.example`](stack.prod.env.example) как шаблон env-файла для сервера;
-- workflow [`CI/CD`](.github/workflows/ci-cd.yml) для проверок на GitHub и сборки/deploy через self-hosted runner.
+- workflow [`CI/CD`](.github/workflows/ci-cd.yml) для проверок на GitHub и deploy через self-hosted runner;
+- [`deploy.env.example`](deploy.env.example) как шаблон файла с путями к существующему checkout на сервере.
 
 Подробная инструкция по настройке GitHub, runner и сервера есть в [`docs/self-hosted-runner-deploy.md`](docs/self-hosted-runner-deploy.md).
 

@@ -60,39 +60,48 @@ jobs:
     permissions:
       contents: read
     env:
-      COMPOSE_PROJECT_NAME: dota-dog
-      PROD_ENV_FILE: /opt/dota-dog/stack.env
+      DEPLOY_SETTINGS_FILE: /opt/dota-dog/deploy.env
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build application image
-        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" build bot
-
-      - name: Start database
-        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" up -d db
-
-      - name: Wait for database
+      - name: Load deploy settings
         shell: bash
         run: |
           set -euo pipefail
-          source "${PROD_ENV_FILE}"
-          for attempt in {1..30}; do
-            if docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" exec -T db \
-              pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Database is not ready in time" >&2
-          exit 1
+          if [[ ! -f "${DEPLOY_SETTINGS_FILE}" ]]; then
+            echo "Deploy settings file not found: ${DEPLOY_SETTINGS_FILE}" >&2
+            exit 1
+          fi
+          source "${DEPLOY_SETTINGS_FILE}"
+          : "${DEPLOY_DIR:?DEPLOY_DIR must be set in ${DEPLOY_SETTINGS_FILE}}"
+          deploy_branch="${DEPLOY_BRANCH:-main}"
+          compose_file="${DEPLOY_COMPOSE_FILE:-docker-compose.yml}"
+          echo "DEPLOY_DIR=${DEPLOY_DIR}" >> "$GITHUB_ENV"
+          echo "DEPLOY_BRANCH=${deploy_branch}" >> "$GITHUB_ENV"
+          echo "DEPLOY_COMPOSE_FILE=${compose_file}" >> "$GITHUB_ENV"
 
-      - name: Run migrations
-        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" run --rm migrate
+      - name: Validate server checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "${DEPLOY_DIR}"
+          test -d "${DEPLOY_DIR}/.git"
+          test -f "${DEPLOY_DIR}/${DEPLOY_COMPOSE_FILE}"
 
-      - name: Restart bot and worker
-        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" up -d bot worker
+      - name: Refuse dirty working tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git -C "${DEPLOY_DIR}" diff --quiet || ! git -C "${DEPLOY_DIR}" diff --cached --quiet; then
+            echo "Server checkout has uncommitted changes. Refusing to deploy." >&2
+            git -C "${DEPLOY_DIR}" status --short
+            exit 1
+          fi
+
+      - name: Update repository
+        run: git -C "${DEPLOY_DIR}" pull --ff-only origin "${DEPLOY_BRANCH}"
+
+      - name: Rebuild and restart services
+        run: docker compose --project-directory "${DEPLOY_DIR}" -f "${DEPLOY_DIR}/${DEPLOY_COMPOSE_FILE}" up -d --build
 
       - name: Show service status
-        run: docker compose -f docker-compose.prod.yml --env-file "${PROD_ENV_FILE}" ps
+        run: docker compose --project-directory "${DEPLOY_DIR}" -f "${DEPLOY_DIR}/${DEPLOY_COMPOSE_FILE}" ps

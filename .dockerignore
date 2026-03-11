@@ -9,7 +9,5 @@ old_code
 tests
 .env
 stack.env
-stack.prod.env.example
-docker-compose.portainer.yml
-docker-compose.prod.yml
 docker-compose.yml
+docker-compose.portainer.yml
