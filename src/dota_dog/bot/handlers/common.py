@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,7 @@ from dota_dog.services.permissions import PermissionService
 from dota_dog.services.reporting import ReportingService
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -477,16 +479,36 @@ async def resync_handler(message: Message, deps: HandlerDependencies) -> None:
         if player_filter is not None and not selected_players:
             await message.answer("Игрок не найден в этом topic.")
             return
+        scope = selected_players or players
+        await message.answer(
+            f"Запускаю resync за последние {days} дн. для {len(scope)} игрок(ов). "
+            "Это может занять до нескольких минут."
+        )
         results = []
-        for player in selected_players or players:
-            result = await deps.backfill_service.resync_player(
-                session=session,
-                client=deps.opendota_client,
-                topic_id=topic.id,
-                player=player,
-                days=days,
-            )
-            results.append(result)
+        failures = []
+        for player in scope:
+            try:
+                result = await deps.backfill_service.resync_player(
+                    session=session,
+                    client=deps.opendota_client,
+                    topic_id=topic.id,
+                    player=player,
+                    days=days,
+                )
+                results.append(result)
+            except Exception as exc:
+                player_label = player.alias or player.display_name
+                logger.exception(
+                    "resync failed",
+                    extra={
+                        "chat_id": message.chat.id,
+                        "thread_id": message.message_thread_id,
+                        "topic_id": topic.id,
+                        "player_id": player.player_id,
+                        "dota_account_id": player.dota_account_id,
+                    },
+                )
+                failures.append(f"{player_label}: {exc}")
         await session.commit()
     lines = [f"Resync for last {days} day(s):"]
     for result in results:
@@ -494,4 +516,8 @@ async def resync_handler(message: Message, deps: HandlerDependencies) -> None:
             f"{result.player_label}: fetched {result.fetched_matches}, "
             f"inserted {result.inserted_matches}"
         )
+    if failures:
+        lines.append("")
+        lines.append("Errors:")
+        lines.extend(failures)
     await message.answer("\n".join(lines))

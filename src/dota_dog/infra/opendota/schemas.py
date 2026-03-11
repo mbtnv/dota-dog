@@ -49,12 +49,12 @@ class OpenDotaRecentMatch(BaseModel):
     kills: int
     deaths: int
     assists: int
-    xp_per_min: int
-    gold_per_min: int
-    hero_damage: int
-    tower_damage: int
-    hero_healing: int
-    last_hits: int
+    xp_per_min: int = 0
+    gold_per_min: int = 0
+    hero_damage: int = 0
+    tower_damage: int = 0
+    hero_healing: int = 0
+    last_hits: int = 0
     party_size: int | None = None
 
 

@@ -8,7 +8,12 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from dota_dog.bot.handlers.common import HandlerDependencies, report_handler, track_handler
+from dota_dog.bot.handlers.common import (
+    HandlerDependencies,
+    report_handler,
+    resync_handler,
+    track_handler,
+)
 from dota_dog.infra.db.base import Base
 from dota_dog.infra.db.models import PlayerMatchORM
 from dota_dog.infra.db.repositories.core import (
@@ -51,6 +56,19 @@ class FakeOpenDotaClient:
         return []
 
 
+class FailingOpenDotaClient(FakeOpenDotaClient):
+    async def get_player_matches(
+        self,
+        account_id: int,
+        *,
+        days: int,
+        limit: int,
+        offset: int,
+    ) -> list[object]:
+        msg = "OpenDota unavailable"
+        raise RuntimeError(msg)
+
+
 class FakeBot:
     def __init__(self, admin_ids: list[int]) -> None:
         self._admin_ids = admin_ids
@@ -80,10 +98,17 @@ class FakeMessage:
 
 
 def _make_deps(session_factory: async_sessionmaker) -> HandlerDependencies:
+    return _make_deps_with_client(session_factory, FakeOpenDotaClient())
+
+
+def _make_deps_with_client(
+    session_factory: async_sessionmaker,
+    client: Any,
+) -> HandlerDependencies:
     tracking_service = TrackingService()
     return HandlerDependencies(
         session_factory=session_factory,
-        opendota_client=FakeOpenDotaClient(),  # type: ignore[arg-type]
+        opendota_client=client,  # type: ignore[arg-type]
         reporting_service=ReportingService(),
         formatter=MessageFormatter(),
         constants_service=ConstantsService(sync_interval_hours=24),
@@ -185,5 +210,85 @@ async def test_report_handler_returns_html_report_for_filtered_player() -> None:
     assert "mid" in message.answers[0][0]
     assert "Matches:" in message.answers[0][0]
     assert message.answers[0][1]["parse_mode"] == "HTML"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_resync_handler_reports_progress_and_result() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="UTC",
+        )
+        player = await PlayerRepository(session).get_or_create(
+            dota_account_id=123456,
+            display_name="Sega",
+            profile_url="https://www.dotabuff.com/players/123456",
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=player.id,
+            alias="mid",
+            added_by_telegram_user_id=1,
+        )
+        await session.commit()
+
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/resync 7")
+
+    await resync_handler(message, deps)
+
+    assert len(message.answers) == 2
+    assert "Запускаю resync" in message.answers[0][0]
+    assert "Resync for last 7 day(s):" in message.answers[1][0]
+    assert "mid: fetched 0, inserted 0" in message.answers[1][0]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_resync_handler_reports_errors_in_chat() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="UTC",
+        )
+        player = await PlayerRepository(session).get_or_create(
+            dota_account_id=123456,
+            display_name="Sega",
+            profile_url="https://www.dotabuff.com/players/123456",
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=player.id,
+            alias="mid",
+            added_by_telegram_user_id=1,
+        )
+        await session.commit()
+
+    deps = _make_deps_with_client(session_factory, FailingOpenDotaClient())
+    message = FakeMessage(text="/resync 7")
+
+    await resync_handler(message, deps)
+
+    assert len(message.answers) == 2
+    assert "Запускаю resync" in message.answers[0][0]
+    assert "Errors:" in message.answers[1][0]
+    assert "mid: OpenDota unavailable" in message.answers[1][0]
 
     await engine.dispose()
