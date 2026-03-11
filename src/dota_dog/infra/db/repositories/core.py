@@ -7,11 +7,13 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from dota_dog.domain.enums import ConstantResource
+from dota_dog.domain.enums import ConstantResource, PeriodType
 from dota_dog.domain.models import (
     ConstantEntry,
     ConstantSnapshot,
     MatchSnapshot,
+    ReportRunSummary,
+    TopicMatchesOverview,
     TopicRuntimeStatus,
     TrackedPlayerRef,
     TrackedTopicRef,
@@ -323,6 +325,28 @@ class MatchRepository:
         )
         return list(result)
 
+    async def get_topic_overview(self, player_ids: Sequence[int]) -> TopicMatchesOverview:
+        if not player_ids:
+            return TopicMatchesOverview(
+                total_rows=0,
+                unique_matches=0,
+                last_match_end_at=None,
+            )
+        total_rows, unique_matches, last_match_end_at = (
+            await self._session.execute(
+                select(
+                    func.count(PlayerMatchORM.id),
+                    func.count(func.distinct(PlayerMatchORM.match_id)),
+                    func.max(PlayerMatchORM.end_time),
+                ).where(PlayerMatchORM.player_id.in_(player_ids))
+            )
+        ).one()
+        return TopicMatchesOverview(
+            total_rows=int(total_rows or 0),
+            unique_matches=int(unique_matches or 0),
+            last_match_end_at=_ensure_utc(last_match_end_at),
+        )
+
 
 class ReportRunRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -362,6 +386,37 @@ class ReportRunRepository:
         self._session.add(report)
         await self._session.flush()
         return report
+
+    async def list_latest_for_topic(self, topic_id: int) -> list[ReportRunSummary]:
+        rows = list(
+            await self._session.scalars(
+                select(ReportRunORM)
+                .where(ReportRunORM.topic_id == topic_id)
+                .order_by(ReportRunORM.created_at.desc())
+            )
+        )
+        latest_by_period: dict[PeriodType, ReportRunSummary] = {}
+        for row in rows:
+            try:
+                period_type = PeriodType(row.period_type)
+            except ValueError:
+                continue
+            if period_type in latest_by_period:
+                continue
+            latest_by_period[period_type] = ReportRunSummary(
+                period_type=period_type,
+                trigger_source=row.trigger_source,
+                created_at=_ensure_utc_required(row.created_at),
+                period_start=_ensure_utc_required(row.period_start),
+                period_end=_ensure_utc_required(row.period_end),
+            )
+            if len(latest_by_period) == len(PeriodType):
+                break
+        return [
+            latest_by_period[period_type]
+            for period_type in PeriodType
+            if period_type in latest_by_period
+        ]
 
 
 class TopicRuntimeRepository:
@@ -434,6 +489,12 @@ def _ensure_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _ensure_utc_required(value: datetime) -> datetime:
+    normalized = _ensure_utc(value)
+    assert normalized is not None
+    return normalized
 
 
 class ConstantRepository:

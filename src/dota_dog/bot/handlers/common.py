@@ -12,11 +12,18 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from dota_dog.domain.enums import PeriodType
-from dota_dog.domain.models import MatchSnapshot, TrackedPlayerRef
+from dota_dog.domain.models import (
+    MatchSnapshot,
+    ReportRunSummary,
+    TopicMatchesOverview,
+    TopicRuntimeStatus,
+    TrackedPlayerRef,
+)
 from dota_dog.infra.db.models import PlayerMatchORM
 from dota_dog.infra.db.repositories.core import (
     MatchRepository,
     PlayerRepository,
+    ReportRunRepository,
     TopicPlayerRepository,
     TopicRepository,
     TopicRuntimeRepository,
@@ -39,7 +46,7 @@ TOPIC_COMMANDS: tuple[tuple[str, str], ...] = (
     ("/players", "Показывает список отслеживаемых игроков в текущем topic."),
     (
         "/status",
-        "Показывает статус topic: игроков, таймзону, паузу и состояние последнего опроса.",
+        "Показывает расширенный статус topic: конфиг, runtime, данные и игроков.",
     ),
     (
         "/report <day|week|month> [account_id|alias]",
@@ -116,6 +123,122 @@ def _fmt_dt(value: datetime | None) -> str:
     if value is None:
         return "-"
     return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _fmt_duration(started_at: datetime | None, finished_at: datetime | None) -> str:
+    if started_at is None or finished_at is None:
+        return "-"
+    total_seconds = max(0, int((finished_at - started_at).total_seconds()))
+    minutes, seconds = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} ч. {minutes} мин."
+    if minutes:
+        return f"{minutes} мин. {seconds} сек."
+    return f"{seconds} сек."
+
+
+def _runtime_state_label(runtime_status: TopicRuntimeStatus | None) -> str:
+    if runtime_status is None or runtime_status.last_poll_started_at is None:
+        return "еще не запускался"
+    if runtime_status.last_poll_finished_at is None:
+        return "выполняется"
+    if runtime_status.last_poll_started_at > runtime_status.last_poll_finished_at:
+        return "выполняется"
+    if runtime_status.last_poll_error:
+        return "ошибка"
+    return "ok"
+
+
+def _format_report_runs(report_runs: list[ReportRunSummary]) -> list[str]:
+    report_by_period = {report.period_type: report for report in report_runs}
+    lines: list[str] = []
+    for period_type in PeriodType:
+        report = report_by_period.get(period_type)
+        if report is None:
+            lines.append(f"- {period_type.value}: -")
+            continue
+        period_range = f"{_fmt_dt(report.period_start)} .. {_fmt_dt(report.period_end)}"
+        lines.append(
+            f"- {period_type.value}: {_fmt_dt(report.created_at)} "
+            f"({report.trigger_source}, {period_range})"
+        )
+    return lines
+
+
+def _format_player_status_lines(players: list[TrackedPlayerRef]) -> list[str]:
+    if not players:
+        return ["- нет игроков"]
+    ordered_players = sorted(
+        players,
+        key=lambda player: (player.alias or player.display_name).lower(),
+    )
+    lines = []
+    for player in ordered_players[:10]:
+        label = player.alias or player.display_name
+        lines.append(
+            f"- {label} ({player.dota_account_id}) · last_seen {player.last_seen_match_id or '-'}"
+        )
+    if len(ordered_players) > 10:
+        lines.append(f"- ... и еще {len(ordered_players) - 10}")
+    return lines
+
+
+def _build_status_text(
+    *,
+    topic_title: str | None,
+    chat_id: int,
+    thread_id: int | None,
+    created_at: datetime,
+    timezone_name: str,
+    is_paused: bool,
+    poll_interval_minutes: int,
+    players: list[TrackedPlayerRef],
+    runtime_status: TopicRuntimeStatus | None,
+    next_poll_at: datetime | None,
+    matches_overview: TopicMatchesOverview,
+    report_runs: list[ReportRunSummary],
+) -> str:
+    initialized_players = sum(1 for player in players if player.last_seen_match_id is not None)
+    last_poll_started_at = runtime_status.last_poll_started_at if runtime_status else None
+    last_poll_finished_at = runtime_status.last_poll_finished_at if runtime_status else None
+    last_poll_succeeded_at = runtime_status.last_poll_succeeded_at if runtime_status else None
+    last_poll_error = runtime_status.last_poll_error if runtime_status else None
+    last_poll_duration = _fmt_duration(last_poll_started_at, last_poll_finished_at)
+    lines = [
+        "Статус topic:",
+        f"Название: {topic_title or '-'}",
+        f"Chat ID: {chat_id}",
+        f"Thread ID: {thread_id if thread_id is not None else '-'}",
+        f"Создан: {_fmt_dt(created_at)}",
+        "",
+        "Конфиг:",
+        f"Таймзона: {timezone_name}",
+        f"Realtime на паузе: {'да' if is_paused else 'нет'}",
+        f"Интервал опроса: {poll_interval_minutes} мин.",
+        f"Игроков: {len(players)} ({initialized_players} инициализировано)",
+        "",
+        "Опрос:",
+        f"Состояние: {_runtime_state_label(runtime_status)}",
+        f"Последний старт: {_fmt_dt(last_poll_started_at)}",
+        f"Последнее завершение: {_fmt_dt(last_poll_finished_at)}",
+        f"Последний успех: {_fmt_dt(last_poll_succeeded_at)}",
+        f"Длительность последнего прохода: {last_poll_duration}",
+        f"Следующий опрос: {_fmt_dt(next_poll_at)}",
+        f"Последняя ошибка: {last_poll_error or '-'}",
+        "",
+        "Данные:",
+        f"Записей матчей: {matches_overview.total_rows}",
+        f"Уникальных матчей: {matches_overview.unique_matches}",
+        f"Последний матч в БД: {_fmt_dt(matches_overview.last_match_end_at)}",
+        "",
+        "Последние отчеты:",
+        *_format_report_runs(report_runs),
+        "",
+        "Игроки:",
+        *_format_player_status_lines(players),
+    ]
+    return "\n".join(lines)
 
 
 def _parse_account_id(raw_value: str) -> int | None:
@@ -347,23 +470,38 @@ async def status_handler(message: Message, deps: HandlerDependencies) -> None:
         if topic is None:
             await message.answer("Topic еще не инициализирован.")
             return
-        players = await TopicPlayerRepository(session).list_topic_players(topic.id)
+        topic_players_repo = TopicPlayerRepository(session)
+        players = await topic_players_repo.list_topic_players(topic.id)
         runtime_status = await TopicRuntimeRepository(session).get_status(topic.id)
+        match_repo = MatchRepository(session)
+        matches_overview = await match_repo.get_topic_overview(
+            [player.player_id for player in players]
+        )
+        report_runs = await ReportRunRepository(session).list_latest_for_topic(topic.id)
     next_poll_at = None
-    if runtime_status is not None and runtime_status.last_poll_succeeded_at is not None:
+    if (
+        not topic.is_paused
+        and runtime_status is not None
+        and runtime_status.last_poll_succeeded_at is not None
+    ):
         next_poll_at = runtime_status.last_poll_succeeded_at + timedelta(
             minutes=deps.poll_interval_minutes
         )
     await message.answer(
-        f"Players: {len(players)}\n"
-        f"Timezone: {topic.timezone}\n"
-        f"Paused: {'yes' if topic.is_paused else 'no'}\n"
-        f"Last poll start: "
-        f"{_fmt_dt(runtime_status.last_poll_started_at if runtime_status else None)}\n"
-        f"Last poll success: "
-        f"{_fmt_dt(runtime_status.last_poll_succeeded_at if runtime_status else None)}\n"
-        f"Next poll: {_fmt_dt(next_poll_at)}\n"
-        f"Last error: {runtime_status.last_poll_error if runtime_status else '-'}"
+        _build_status_text(
+            topic_title=topic.title,
+            chat_id=topic.telegram_chat_id,
+            thread_id=topic.telegram_thread_id,
+            created_at=topic.created_at,
+            timezone_name=topic.timezone,
+            is_paused=topic.is_paused,
+            poll_interval_minutes=deps.poll_interval_minutes,
+            players=players,
+            runtime_status=runtime_status,
+            next_poll_at=next_poll_at,
+            matches_overview=matches_overview,
+            report_runs=report_runs,
+        )
     )
 
 

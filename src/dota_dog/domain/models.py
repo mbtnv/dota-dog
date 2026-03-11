@@ -93,6 +93,22 @@ class TopicRuntimeStatus:
 
 
 @dataclass(slots=True)
+class TopicMatchesOverview:
+    total_rows: int
+    unique_matches: int
+    last_match_end_at: datetime | None
+
+
+@dataclass(slots=True)
+class ReportRunSummary:
+    period_type: PeriodType
+    trigger_source: str
+    created_at: datetime
+    period_start: datetime
+    period_end: datetime
+
+
+@dataclass(slots=True)
 class ConstantEntry:
     resource: ConstantResource
     code: int

@@ -15,14 +15,18 @@ from dota_dog.bot.handlers.common import (
     limits_handler,
     report_handler,
     resync_handler,
+    status_handler,
     track_handler,
 )
+from dota_dog.domain.enums import PeriodType
 from dota_dog.infra.db.base import Base
 from dota_dog.infra.db.models import PlayerMatchORM
 from dota_dog.infra.db.repositories.core import (
     PlayerRepository,
+    ReportRunRepository,
     TopicPlayerRepository,
     TopicRepository,
+    TopicRuntimeRepository,
 )
 from dota_dog.infra.opendota.client import OpenDotaRateLimitSnapshot
 from dota_dog.infra.opendota.schemas import OpenDotaProfileResponse
@@ -202,6 +206,148 @@ async def test_track_handler_adds_player_from_profile_url() -> None:
     assert players[0].dota_account_id == 123456
     assert players[0].alias == "mid"
     assert "Добавлен" in message.answers[0][0]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_status_handler_returns_extended_topic_summary() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="Europe/Moscow",
+        )
+        mid = await PlayerRepository(session).get_or_create(
+            dota_account_id=123456,
+            display_name="Sega",
+            profile_url="https://www.dotabuff.com/players/123456",
+        )
+        support = await PlayerRepository(session).get_or_create(
+            dota_account_id=222222,
+            display_name="Pablo",
+            profile_url="https://www.dotabuff.com/players/222222",
+        )
+        mid_relation = await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=mid.id,
+            alias="mid",
+            added_by_telegram_user_id=1,
+        )
+        support_relation = await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=support.id,
+            alias=None,
+            added_by_telegram_user_id=1,
+        )
+        assert mid_relation is not None
+        assert support_relation is not None
+        mid_relation.last_seen_match_id = 1002
+        runtime_repo = TopicRuntimeRepository(session)
+        await runtime_repo.mark_succeeded(
+            topic.id,
+            started_at=datetime(2026, 3, 11, 8, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 3, 11, 8, 2, 30, tzinfo=UTC),
+        )
+        session.add_all(
+            [
+                PlayerMatchORM(
+                    player_id=mid.id,
+                    match_id=1001,
+                    start_time=datetime(2026, 3, 11, 6, 50, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 11, 7, 30, tzinfo=UTC),
+                    hero_id=74,
+                    radiant_win=True,
+                    player_slot=0,
+                    kills=10,
+                    deaths=2,
+                    assists=9,
+                    gpm=700,
+                    xpm=800,
+                    hero_damage=21000,
+                    tower_damage=5000,
+                    hero_healing=0,
+                    last_hits=250,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=1,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 11, 7, 31, tzinfo=UTC),
+                ),
+                PlayerMatchORM(
+                    player_id=support.id,
+                    match_id=1002,
+                    start_time=datetime(2026, 3, 11, 7, 0, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 11, 7, 45, tzinfo=UTC),
+                    hero_id=5,
+                    radiant_win=False,
+                    player_slot=128,
+                    kills=2,
+                    deaths=8,
+                    assists=21,
+                    gpm=320,
+                    xpm=500,
+                    hero_damage=9000,
+                    tower_damage=400,
+                    hero_healing=1200,
+                    last_hits=44,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=2,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 11, 7, 46, tzinfo=UTC),
+                ),
+            ]
+        )
+        report_repo = ReportRunRepository(session)
+        report = await report_repo.create(
+            topic_id=topic.id,
+            period_type=PeriodType.DAY.value,
+            period_start=datetime(2026, 3, 10, 0, 0, tzinfo=UTC),
+            period_end=datetime(2026, 3, 11, 0, 0, tzinfo=UTC),
+            trigger_source="auto",
+            telegram_message_id=None,
+        )
+        report.created_at = datetime(2026, 3, 11, 8, 5, tzinfo=UTC)
+        await session.commit()
+
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/status")
+
+    await status_handler(message, deps)
+
+    assert len(message.answers) == 1
+    text = message.answers[0][0]
+    assert "Статус topic:" in text
+    assert "Название: Test topic" in text
+    assert "Chat ID: -1001" in text
+    assert "Thread ID: 10" in text
+    assert "Таймзона: Europe/Moscow" in text
+    assert "Realtime на паузе: нет" in text
+    assert "Интервал опроса: 15 мин." in text
+    assert "Игроков: 2 (1 инициализировано)" in text
+    assert "Состояние: ok" in text
+    assert "Последний старт: 2026-03-11 08:00 UTC" in text
+    assert "Последнее завершение: 2026-03-11 08:02 UTC" in text
+    assert "Последний успех: 2026-03-11 08:02 UTC" in text
+    assert "Длительность последнего прохода: 2 мин. 30 сек." in text
+    assert "Следующий опрос: 2026-03-11 08:17 UTC" in text
+    assert "Записей матчей: 2" in text
+    assert "Уникальных матчей: 2" in text
+    assert "Последний матч в БД: 2026-03-11 07:45 UTC" in text
+    assert (
+        "- day: 2026-03-11 08:05 UTC (auto, 2026-03-10 00:00 UTC .. 2026-03-11 00:00 UTC)" in text
+    )
+    assert "- week: -" in text
+    assert "- month: -" in text
+    assert "- mid (123456) · last_seen 1002" in text
+    assert "- Pablo (222222) · last_seen -" in text
 
     await engine.dispose()
 
