@@ -210,17 +210,37 @@ class MatchRepository:
             return []
         player_id = matches[0].player_id
         match_ids = [match.match_id for match in matches]
-        existing_ids = set(
+        existing_rows = list(
             await self._session.scalars(
-                select(PlayerMatchORM.match_id).where(
+                select(PlayerMatchORM).where(
                     PlayerMatchORM.player_id == player_id,
                     PlayerMatchORM.match_id.in_(match_ids),
                 )
             )
         )
+        existing_by_match_id = {row.match_id: row for row in existing_rows}
         inserted: list[MatchSnapshot] = []
         for match in matches:
-            if match.match_id in existing_ids:
+            existing = existing_by_match_id.get(match.match_id)
+            if existing is not None:
+                existing.start_time = match.start_time
+                existing.end_time = match.end_time
+                existing.hero_id = match.hero_id
+                existing.radiant_win = match.radiant_win
+                existing.player_slot = match.player_slot
+                existing.kills = match.kills
+                existing.deaths = match.deaths
+                existing.assists = match.assists
+                existing.gpm = match.gpm
+                existing.xpm = match.xpm
+                existing.hero_damage = match.hero_damage
+                existing.tower_damage = match.tower_damage
+                existing.hero_healing = match.hero_healing
+                existing.last_hits = match.last_hits
+                existing.game_mode = match.game_mode
+                existing.lobby_type = match.lobby_type
+                existing.party_size = match.party_size
+                existing.raw_payload = match.raw_payload
                 continue
             self._session.add(
                 PlayerMatchORM(
