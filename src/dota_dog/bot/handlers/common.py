@@ -512,10 +512,13 @@ async def resync_handler(message: Message, deps: HandlerDependencies) -> None:
         await session.commit()
     lines = [f"Resync for last {days} day(s):"]
     for result in results:
-        lines.append(
+        line = (
             f"{result.player_label}: fetched {result.fetched_matches}, "
             f"inserted {result.inserted_matches}"
         )
+        if result.failed_matches:
+            line += f", failed {result.failed_matches}"
+        lines.append(line)
     if failures:
         lines.append("")
         lines.append("Errors:")

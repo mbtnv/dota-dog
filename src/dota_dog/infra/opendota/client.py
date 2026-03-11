@@ -69,6 +69,30 @@ class OpenDotaClient:
         payload = response.json()
         return [OpenDotaPlayerMatch.model_validate(item) for item in payload]
 
+    async def get_match_players(self, match_id: int) -> Sequence[OpenDotaPlayerMatch]:
+        response = await self._request(f"/matches/{match_id}")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            msg = f"Unexpected match payload for match {match_id}"
+            raise TypeError(msg)
+        players = payload.get("players")
+        if not isinstance(players, list):
+            msg = f"Unexpected players payload for match {match_id}"
+            raise TypeError(msg)
+        resolved_match_id = payload.get("match_id")
+        if not isinstance(resolved_match_id, int):
+            resolved_match_id = match_id
+        return [
+            OpenDotaPlayerMatch.model_validate(
+                {
+                    "match_id": resolved_match_id,
+                    **item,
+                }
+            )
+            for item in players
+            if isinstance(item, dict)
+        ]
+
     def _request_params(self) -> dict[str, str]:
         if not self._api_key:
             return {}

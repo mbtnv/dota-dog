@@ -55,6 +55,9 @@ class FakeOpenDotaClient:
     ) -> list[object]:
         return []
 
+    async def get_match_players(self, match_id: int) -> list[object]:
+        return []
+
 
 class FailingOpenDotaClient(FakeOpenDotaClient):
     async def get_player_matches(

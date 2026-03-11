@@ -38,6 +38,7 @@ class OpenDotaProfileResponse(BaseModel):
 class OpenDotaRecentMatch(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    account_id: int | None = None
     match_id: int
     player_slot: int
     radiant_win: bool

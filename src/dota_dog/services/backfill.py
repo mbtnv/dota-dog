@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -10,6 +11,8 @@ from dota_dog.domain.models import TrackedPlayerRef
 from dota_dog.infra.db.repositories.core import MatchRepository, TopicPlayerRepository
 from dota_dog.infra.opendota.schemas import OpenDotaPlayerMatch
 from dota_dog.services.tracking import TrackingService
+
+logger = logging.getLogger(__name__)
 
 
 class MatchHistoryClient(Protocol):
@@ -22,12 +25,15 @@ class MatchHistoryClient(Protocol):
         offset: int,
     ) -> Sequence[OpenDotaPlayerMatch]: ...
 
+    async def get_match_players(self, match_id: int) -> Sequence[OpenDotaPlayerMatch]: ...
+
 
 @dataclass(slots=True)
 class ResyncResult:
     player_label: str
     inserted_matches: int
     fetched_matches: int
+    failed_matches: int = 0
 
 
 class BackfillService:
@@ -46,7 +52,7 @@ class BackfillService:
     ) -> ResyncResult:
         match_repo = MatchRepository(session)
         topic_player_repo = TopicPlayerRepository(session)
-        fetched_matches = await self._fetch_all_matches(
+        fetched_matches, failed_matches = await self._fetch_all_matches(
             client=client,
             account_id=player.dota_account_id,
             days=days,
@@ -70,6 +76,7 @@ class BackfillService:
             player_label=player.alias or player.display_name,
             inserted_matches=len(inserted),
             fetched_matches=len(fetched_matches),
+            failed_matches=failed_matches,
         )
 
     async def _fetch_all_matches(
@@ -79,9 +86,9 @@ class BackfillService:
         account_id: int,
         days: int,
         page_size: int,
-    ) -> list[OpenDotaPlayerMatch]:
+    ) -> tuple[list[OpenDotaPlayerMatch], int]:
         offset = 0
-        collected: list[OpenDotaPlayerMatch] = []
+        summary_matches: list[OpenDotaPlayerMatch] = []
         while True:
             page = list(
                 await client.get_player_matches(
@@ -93,8 +100,48 @@ class BackfillService:
             )
             if not page:
                 break
-            collected.extend(page)
+            summary_matches.extend(page)
             if len(page) < page_size:
                 break
             offset += page_size
-        return collected
+        collected: list[OpenDotaPlayerMatch] = []
+        failed_matches = 0
+        for summary in summary_matches:
+            try:
+                match_players = await client.get_match_players(summary.match_id)
+            except Exception:
+                failed_matches += 1
+                logger.exception(
+                    "failed to fetch match details for resync",
+                    extra={"account_id": account_id, "match_id": summary.match_id},
+                )
+                continue
+            player_match = self._select_player_match(
+                match_players=match_players,
+                account_id=account_id,
+                player_slot=summary.player_slot,
+            )
+            if player_match is None:
+                failed_matches += 1
+                logger.warning(
+                    "tracked player not found in match details",
+                    extra={"account_id": account_id, "match_id": summary.match_id},
+                )
+                continue
+            collected.append(player_match)
+        return collected, failed_matches
+
+    @staticmethod
+    def _select_player_match(
+        *,
+        match_players: Sequence[OpenDotaPlayerMatch],
+        account_id: int,
+        player_slot: int,
+    ) -> OpenDotaPlayerMatch | None:
+        for player in match_players:
+            if player.account_id == account_id:
+                return player
+        for player in match_players:
+            if player.player_slot == player_slot:
+                return player
+        return None

@@ -18,8 +18,13 @@ from dota_dog.services.tracking import TrackingService
 
 
 class FakeHistoryClient:
-    def __init__(self, matches: list[OpenDotaPlayerMatch]) -> None:
+    def __init__(
+        self,
+        matches: list[OpenDotaPlayerMatch],
+        details_by_match_id: dict[int, list[OpenDotaPlayerMatch]] | None = None,
+    ) -> None:
         self._matches = matches
+        self._details_by_match_id = details_by_match_id or {}
 
     async def get_player_matches(
         self,
@@ -31,11 +36,21 @@ class FakeHistoryClient:
     ) -> list[OpenDotaPlayerMatch]:
         return self._matches[offset : offset + limit]
 
+    async def get_match_players(self, match_id: int) -> list[OpenDotaPlayerMatch]:
+        return self._details_by_match_id[match_id]
 
-def _player_match(match_id: int, start_time: int) -> OpenDotaPlayerMatch:
+
+def _player_match(
+    match_id: int,
+    start_time: int,
+    *,
+    player_slot: int = 0,
+    sparse: bool = False,
+) -> OpenDotaPlayerMatch:
     return OpenDotaPlayerMatch(
+        account_id=123,
         match_id=match_id,
-        player_slot=0,
+        player_slot=player_slot,
         radiant_win=True,
         duration=1800,
         game_mode=22,
@@ -45,12 +60,12 @@ def _player_match(match_id: int, start_time: int) -> OpenDotaPlayerMatch:
         kills=10,
         deaths=2,
         assists=5,
-        xp_per_min=700,
-        gold_per_min=650,
-        hero_damage=20000,
-        tower_damage=4000,
+        xp_per_min=0 if sparse else 700,
+        gold_per_min=0 if sparse else 650,
+        hero_damage=0 if sparse else 20000,
+        tower_damage=0 if sparse else 4000,
         hero_healing=0,
-        last_hits=250,
+        last_hits=0 if sparse else 250,
         party_size=1,
     )
 
@@ -86,9 +101,13 @@ async def test_backfill_service_persists_matches_and_updates_last_seen() -> None
 
     client = FakeHistoryClient(
         [
-            _player_match(1001, 1_700_000_000),
-            _player_match(1002, 1_700_010_000),
-        ]
+            _player_match(1001, 1_700_000_000, sparse=True),
+            _player_match(1002, 1_700_010_000, sparse=True),
+        ],
+        details_by_match_id={
+            1001: [_player_match(1001, 1_700_000_000)],
+            1002: [_player_match(1002, 1_700_010_000)],
+        },
     )
     service = BackfillService(TrackingService())
 
@@ -115,7 +134,12 @@ async def test_backfill_service_persists_matches_and_updates_last_seen() -> None
 
     assert result.fetched_matches == 2
     assert result.inserted_matches == 2
+    assert result.failed_matches == 0
     assert sorted(match.match_id for match in matches) == [1001, 1002]
+    assert all(match.gpm == 650 for match in matches)
+    assert all(match.xpm == 700 for match in matches)
+    assert all(match.hero_damage == 20000 for match in matches)
+    assert all(match.last_hits == 250 for match in matches)
     assert players[0].last_seen_match_id == 1002
 
     await engine.dispose()
