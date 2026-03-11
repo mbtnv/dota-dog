@@ -288,11 +288,38 @@ class MatchRepository:
         *,
         limit: int,
     ) -> list[PlayerMatchORM]:
+        if not player_ids or limit <= 0:
+            return []
         result = await self._session.scalars(
             select(PlayerMatchORM)
             .where(PlayerMatchORM.player_id.in_(player_ids))
-            .order_by(PlayerMatchORM.end_time.desc())
+            .order_by(
+                PlayerMatchORM.end_time.desc(),
+                PlayerMatchORM.match_id.desc(),
+                PlayerMatchORM.player_id.asc(),
+            )
             .limit(limit)
+        )
+        return list(result)
+
+    async def list_matches_by_match_ids_for_players(
+        self,
+        player_ids: Sequence[int],
+        match_ids: Sequence[int],
+    ) -> list[PlayerMatchORM]:
+        if not player_ids or not match_ids:
+            return []
+        result = await self._session.scalars(
+            select(PlayerMatchORM)
+            .where(
+                PlayerMatchORM.player_id.in_(player_ids),
+                PlayerMatchORM.match_id.in_(match_ids),
+            )
+            .order_by(
+                PlayerMatchORM.end_time.desc(),
+                PlayerMatchORM.match_id.desc(),
+                PlayerMatchORM.player_id.asc(),
+            )
         )
         return list(result)
 

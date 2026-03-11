@@ -12,7 +12,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from dota_dog.domain.enums import PeriodType
-from dota_dog.domain.models import MatchSnapshot
+from dota_dog.domain.models import MatchSnapshot, TrackedPlayerRef
 from dota_dog.infra.db.models import PlayerMatchORM
 from dota_dog.infra.db.repositories.core import (
     MatchRepository,
@@ -125,6 +125,50 @@ def _parse_account_id(raw_value: str) -> int | None:
     if match is not None:
         return int(match.group(1))
     return None
+
+
+def _select_recent_match_ids(matches: list[PlayerMatchORM], *, limit: int) -> list[int]:
+    recent_match_ids: list[int] = []
+    seen_match_ids: set[int] = set()
+    for match in matches:
+        if match.match_id in seen_match_ids:
+            continue
+        seen_match_ids.add(match.match_id)
+        recent_match_ids.append(match.match_id)
+        if len(recent_match_ids) == limit:
+            break
+    return recent_match_ids
+
+
+def _group_recent_matches(
+    *,
+    match_ids: list[int],
+    matches: list[PlayerMatchORM],
+    players: list[TrackedPlayerRef],
+) -> list[list[tuple[TrackedPlayerRef, MatchSnapshot]]]:
+    grouped_matches: dict[int, list[tuple[TrackedPlayerRef, MatchSnapshot]]] = {
+        match_id: [] for match_id in match_ids
+    }
+    player_by_id = {player.player_id: player for player in players}
+    player_order = {player.player_id: index for index, player in enumerate(players)}
+
+    for match in matches:
+        if match.match_id not in grouped_matches:
+            continue
+        player = player_by_id.get(match.player_id)
+        if player is None:
+            continue
+        grouped_matches[match.match_id].append((player, _orm_to_snapshot(match)))
+
+    items: list[list[tuple[TrackedPlayerRef, MatchSnapshot]]] = []
+    for match_id in match_ids:
+        entries = sorted(
+            grouped_matches[match_id],
+            key=lambda item: player_order[item[0].player_id],
+        )
+        if entries:
+            items.append(entries)
+    return items
 
 
 def _build_help_text() -> str:
@@ -500,17 +544,29 @@ async def last_handler(message: Message, deps: HandlerDependencies) -> None:
         if player_filter is not None and not selected_players:
             await message.answer("Игрок не найден в этом topic.")
             return
-        orm_matches = await MatchRepository(session).list_recent_matches_for_players(
-            [player.player_id for player in selected_players or players],
-            limit=count,
+        selected_or_all = selected_players or players
+        selected_player_ids = [player.player_id for player in selected_or_all]
+        match_repo = MatchRepository(session)
+        recent_matches = await match_repo.list_recent_matches_for_players(
+            selected_player_ids,
+            limit=count * max(1, len(selected_player_ids)),
+        )
+        recent_match_ids = _select_recent_match_ids(recent_matches, limit=count)
+        orm_matches = await match_repo.list_matches_by_match_ids_for_players(
+            [player.player_id for player in players],
+            recent_match_ids,
         )
         constants = await deps.constants_service.get_snapshot(session)
-    player_by_id = {player.player_id: player for player in players}
-    items = [
-        (player_by_id[match.player_id], _orm_to_snapshot(match))
-        for match in orm_matches
-        if match.player_id in player_by_id
-    ]
+    selected_player_ids = {player.player_id for player in selected_players or players}
+    ordered_players = [player for player in selected_players or players]
+    ordered_players.extend(
+        player for player in players if player.player_id not in selected_player_ids
+    )
+    items = _group_recent_matches(
+        match_ids=recent_match_ids,
+        matches=orm_matches,
+        players=ordered_players,
+    )
     text = deps.formatter.format_recent_matches("Last matches", items, constants)
     await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
 

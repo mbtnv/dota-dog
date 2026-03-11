@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from dota_dog.bot.handlers.common import (
     HandlerDependencies,
     help_handler,
+    last_handler,
     limits_handler,
     report_handler,
     resync_handler,
@@ -266,6 +267,238 @@ async def test_report_handler_returns_html_report_for_filtered_player() -> None:
     assert "mid" in message.answers[0][0]
     assert "Matches:" in message.answers[0][0]
     assert message.answers[0][1]["parse_mode"] == "HTML"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_last_handler_groups_shared_match_into_single_block() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="UTC",
+        )
+        bigbaby = await PlayerRepository(session).get_or_create(
+            dota_account_id=111111,
+            display_name="BIGBABY",
+            profile_url="https://www.dotabuff.com/players/111111",
+        )
+        sega = await PlayerRepository(session).get_or_create(
+            dota_account_id=222222,
+            display_name="Sega",
+            profile_url="https://www.dotabuff.com/players/222222",
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=bigbaby.id,
+            alias="BIGBABY",
+            added_by_telegram_user_id=1,
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=sega.id,
+            alias="sega",
+            added_by_telegram_user_id=1,
+        )
+        session.add_all(
+            [
+                PlayerMatchORM(
+                    player_id=bigbaby.id,
+                    match_id=2002,
+                    start_time=datetime(2026, 3, 11, 8, 10, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 11, 9, 2, tzinfo=UTC),
+                    hero_id=74,
+                    radiant_win=False,
+                    player_slot=0,
+                    kills=13,
+                    deaths=10,
+                    assists=18,
+                    gpm=425,
+                    xpm=700,
+                    hero_damage=27187,
+                    tower_damage=1687,
+                    hero_healing=0,
+                    last_hits=185,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=2,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 11, 9, 3, tzinfo=UTC),
+                ),
+                PlayerMatchORM(
+                    player_id=sega.id,
+                    match_id=2002,
+                    start_time=datetime(2026, 3, 11, 8, 10, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 11, 9, 2, tzinfo=UTC),
+                    hero_id=5,
+                    radiant_win=False,
+                    player_slot=0,
+                    kills=2,
+                    deaths=8,
+                    assists=21,
+                    gpm=320,
+                    xpm=500,
+                    hero_damage=9000,
+                    tower_damage=400,
+                    hero_healing=1200,
+                    last_hits=44,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=2,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 11, 9, 3, tzinfo=UTC),
+                ),
+                PlayerMatchORM(
+                    player_id=bigbaby.id,
+                    match_id=2001,
+                    start_time=datetime(2026, 3, 10, 12, 0, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 10, 12, 30, tzinfo=UTC),
+                    hero_id=138,
+                    radiant_win=True,
+                    player_slot=0,
+                    kills=10,
+                    deaths=2,
+                    assists=9,
+                    gpm=700,
+                    xpm=800,
+                    hero_damage=21000,
+                    tower_damage=5000,
+                    hero_healing=0,
+                    last_hits=250,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=1,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 10, 12, 31, tzinfo=UTC),
+                ),
+            ]
+        )
+        await session.commit()
+
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/last 1")
+
+    await last_handler(message, deps)
+
+    assert len(message.answers) == 1
+    text = message.answers[0][0]
+    assert "BIGBABY" in text
+    assert "sega" in text
+    assert "Crystal Maiden" in text
+    assert "Muerta" not in text
+    assert text.count("Ended:") == 1
+    assert text.count("Dotabuff") == 1
+    assert message.answers[0][1]["parse_mode"] == "HTML"
+    assert message.answers[0][1]["disable_web_page_preview"] is True
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_last_handler_keeps_shared_players_when_filtered() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="UTC",
+        )
+        bigbaby = await PlayerRepository(session).get_or_create(
+            dota_account_id=111111,
+            display_name="BIGBABY",
+            profile_url="https://www.dotabuff.com/players/111111",
+        )
+        sega = await PlayerRepository(session).get_or_create(
+            dota_account_id=222222,
+            display_name="Sega",
+            profile_url="https://www.dotabuff.com/players/222222",
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=bigbaby.id,
+            alias="BIGBABY",
+            added_by_telegram_user_id=1,
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=sega.id,
+            alias="sega",
+            added_by_telegram_user_id=1,
+        )
+        session.add_all(
+            [
+                PlayerMatchORM(
+                    player_id=bigbaby.id,
+                    match_id=2002,
+                    start_time=datetime(2026, 3, 11, 8, 10, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 11, 9, 2, tzinfo=UTC),
+                    hero_id=74,
+                    radiant_win=False,
+                    player_slot=0,
+                    kills=13,
+                    deaths=10,
+                    assists=18,
+                    gpm=425,
+                    xpm=700,
+                    hero_damage=27187,
+                    tower_damage=1687,
+                    hero_healing=0,
+                    last_hits=185,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=2,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 11, 9, 3, tzinfo=UTC),
+                ),
+                PlayerMatchORM(
+                    player_id=sega.id,
+                    match_id=2002,
+                    start_time=datetime(2026, 3, 11, 8, 10, tzinfo=UTC),
+                    end_time=datetime(2026, 3, 11, 9, 2, tzinfo=UTC),
+                    hero_id=5,
+                    radiant_win=False,
+                    player_slot=0,
+                    kills=2,
+                    deaths=8,
+                    assists=21,
+                    gpm=320,
+                    xpm=500,
+                    hero_damage=9000,
+                    tower_damage=400,
+                    hero_healing=1200,
+                    last_hits=44,
+                    game_mode=22,
+                    lobby_type=7,
+                    party_size=2,
+                    raw_payload={},
+                    created_at=datetime(2026, 3, 11, 9, 3, tzinfo=UTC),
+                ),
+            ]
+        )
+        await session.commit()
+
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/last 1 BIGBABY")
+
+    await last_handler(message, deps)
+
+    assert len(message.answers) == 1
+    text = message.answers[0][0]
+    assert "BIGBABY" in text
+    assert "sega" in text
+    assert text.count("Dotabuff") == 1
 
     await engine.dispose()
 

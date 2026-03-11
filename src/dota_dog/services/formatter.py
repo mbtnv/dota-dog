@@ -102,14 +102,14 @@ class MessageFormatter:
     def format_recent_matches(
         self,
         title: str,
-        items: list[tuple[TrackedPlayerRef, MatchSnapshot]],
+        items: list[list[tuple[TrackedPlayerRef, MatchSnapshot]]],
         constants: ConstantSnapshot | None = None,
     ) -> str:
         header = f"<b>{escape(title)}</b>"
         if not items:
             return f"{header}\nNo matches."
         body = "\n\n".join(
-            self.format_match_notification(player, match, constants) for player, match in items
+            self._format_recent_match_group(group, constants) for group in items
         )
         return f"{header}\n\n{body}"
 
@@ -133,6 +133,42 @@ class MessageFormatter:
         if party_size == 1:
             return " · Solo"
         return f" · Party {party_size}"
+
+    def _format_recent_match_group(
+        self,
+        group: list[tuple[TrackedPlayerRef, MatchSnapshot]],
+        constants: ConstantSnapshot | None,
+    ) -> str:
+        first_match = group[0][1]
+        ended_at = first_match.end_time.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        duration_minutes = int(first_match.duration.total_seconds() // 60)
+        labels = ", ".join(escape(player.alias or player.display_name) for player, _ in group)
+        parts = [
+            f"<b>{labels}</b>",
+            f"Ended: {ended_at} ({duration_minutes} min)",
+            f"Mode: {self._game_mode_name(first_match.game_mode, constants)} · "
+            f"{self._lobby_type_name(first_match.lobby_type, constants)}",
+        ]
+        for player, match in group:
+            profile_url = player.profile_url or dotabuff_profile_url(player.dota_account_id)
+            hero = self._hero_name(match.hero_id, constants)
+            outcome = "Win" if match.is_win else "Lose"
+            parts.append(
+                f"<b>{escape(player.alias or player.display_name)}</b> · "
+                f'<a href="{escape(profile_url)}">profile</a> · '
+                f"{outcome} · {escape(hero)}"
+                f"{self._format_party(match.party_size)}"
+            )
+            parts.append(
+                f"KDA: {match.kills}/{match.deaths}/{match.assists} | "
+                f"GPM/XPM: {match.gpm}/{match.xpm} | "
+                f"Last hits: {match.last_hits}"
+            )
+            parts.append(
+                f"HD/TD/HH: {match.hero_damage}/{match.tower_damage}/{match.hero_healing}"
+            )
+        parts.append(f'<a href="{dotabuff_match_url(first_match.match_id)}">Dotabuff</a>')
+        return "\n".join(parts)
 
     @staticmethod
     def _hero_name(hero_id: int, constants: ConstantSnapshot | None) -> str:
