@@ -109,6 +109,24 @@ docker compose up --build
 - `bot` - Telegram bot;
 - `worker` - фоновые задачи.
 
+### Portainer
+
+Для деплоя через Portainer используйте:
+
+- [`docker-compose.portainer.yml`](docker-compose.portainer.yml) как stack file;
+- [`stack.env`](stack.env) как набор переменных окружения для stack.
+
+Что нужно отредактировать в `stack.env` перед деплоем:
+
+- `BOT_TOKEN`
+- `POSTGRES_PASSWORD`
+- при необходимости `DEFAULT_TIMEZONE`, `POLL_INTERVAL_MINUTES`, `ALLOWED_TELEGRAM_USER_IDS`
+
+Важно:
+
+- `DATABASE_URL` в `stack.env` не нужен, в `docker-compose.portainer.yml` он собирается автоматически из `POSTGRES_DB`, `POSTGRES_USER` и `POSTGRES_PASSWORD`;
+- `OPENDOTA_API_KEY` можно оставить пустым, если ключ не используется.
+
 ### Локальный запуск без Docker
 
 Если Postgres работает локально, поменяйте `DATABASE_URL`, например:
