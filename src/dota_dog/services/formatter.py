@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from html import escape
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dota_dog.domain.models import ConstantSnapshot, MatchSnapshot, ReportSummary, TrackedPlayerRef
 
@@ -40,11 +41,12 @@ class MessageFormatter:
         player: TrackedPlayerRef,
         match: MatchSnapshot,
         constants: ConstantSnapshot | None = None,
+        timezone_name: str = "UTC",
     ) -> str:
         profile_url = player.profile_url or dotabuff_profile_url(player.dota_account_id)
         hero = self._hero_name(match.hero_id, constants)
         outcome = self._format_outcome(match.is_win)
-        ended_at = match.end_time.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        ended_at = self._format_datetime(match.end_time, timezone_name)
         duration_minutes = int(match.duration.total_seconds() // 60)
         parts = [
             f"<b>{escape(player.alias or player.display_name)}</b> · "
@@ -106,11 +108,14 @@ class MessageFormatter:
         title: str,
         items: list[list[tuple[TrackedPlayerRef, MatchSnapshot]]],
         constants: ConstantSnapshot | None = None,
+        timezone_name: str = "UTC",
     ) -> str:
         header = f"<b>{escape(title)}</b>"
         if not items:
             return f"{header}\nNo matches."
-        body = "\n\n".join(self._format_recent_match_group(group, constants) for group in items)
+        body = "\n\n".join(
+            self._format_recent_match_group(group, constants, timezone_name) for group in items
+        )
         return f"{header}\n\n{body}"
 
     def format_leaderboard(self, title: str, summaries: list[ReportSummary]) -> str:
@@ -138,9 +143,10 @@ class MessageFormatter:
         self,
         group: list[tuple[TrackedPlayerRef, MatchSnapshot]],
         constants: ConstantSnapshot | None,
+        timezone_name: str,
     ) -> str:
         first_match = group[0][1]
-        ended_at = first_match.end_time.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        ended_at = self._format_datetime(first_match.end_time, timezone_name)
         duration_minutes = int(first_match.duration.total_seconds() // 60)
         labels = ", ".join(escape(player.alias or player.display_name) for player, _ in group)
         parts = [
@@ -197,3 +203,14 @@ class MessageFormatter:
     @staticmethod
     def _format_k_value(value: int | float) -> str:
         return f"{value / 1000:.1f}K"
+
+    @staticmethod
+    def _format_datetime(value: datetime, timezone_name: str) -> str:
+        try:
+            tz = ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            tz = ZoneInfo("UTC")
+        normalized = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        localized = normalized.astimezone(tz)
+        tz_label = localized.tzname() or timezone_name
+        return localized.strftime("%Y-%m-%d %H:%M ") + tz_label

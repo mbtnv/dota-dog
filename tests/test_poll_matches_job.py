@@ -81,7 +81,7 @@ async def test_poll_job_initial_sync_persists_without_notification() -> None:
             telegram_chat_id=1,
             telegram_thread_id=10,
             title="Test",
-            timezone="UTC",
+            timezone="Europe/Moscow",
         )
         player = await PlayerRepository(session).get_or_create(
             dota_account_id=123,
@@ -136,7 +136,7 @@ async def test_poll_job_notifies_only_once_for_new_match() -> None:
             telegram_chat_id=1,
             telegram_thread_id=10,
             title="Test",
-            timezone="UTC",
+            timezone="Europe/Moscow",
         )
         player = await PlayerRepository(session).get_or_create(
             dota_account_id=123,
@@ -176,6 +176,7 @@ async def test_poll_job_notifies_only_once_for_new_match() -> None:
     assert len(first_run) == 1
     assert second_run == []
     assert len(sender.sent) == 1
+    assert "<b>Ended</b>: 2026-03-10 03:00 MSK (30 min)" in first_run[0]
     assert "Dotabuff" in first_run[0]
     assert sorted(match.match_id for match in matches) == [1002]
 

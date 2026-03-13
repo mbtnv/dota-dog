@@ -91,6 +91,7 @@ class PollMatchesJob:
                                 player,
                                 snapshot,
                                 constants,
+                                topic.timezone,
                             )
                             await self._sender.send_to_topic(topic, text)
                             messages.append(text)

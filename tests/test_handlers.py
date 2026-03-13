@@ -324,30 +324,38 @@ async def test_status_handler_returns_extended_topic_summary() -> None:
 
     assert len(message.answers) == 1
     text = message.answers[0][0]
-    assert "Статус topic:" in text
-    assert "Название: Test topic" in text
+    assert "<b>Topic Status</b>" in text
+    assert "Title: Test topic" in text
     assert "Chat ID: -1001" in text
     assert "Thread ID: 10" in text
-    assert "Таймзона: Europe/Moscow" in text
-    assert "Realtime на паузе: нет" in text
-    assert "Интервал опроса: 15 мин." in text
-    assert "Игроков: 2 (1 инициализировано)" in text
-    assert "Состояние: ok" in text
-    assert "Последний старт: 2026-03-11 08:00 UTC" in text
-    assert "Последнее завершение: 2026-03-11 08:02 UTC" in text
-    assert "Последний успех: 2026-03-11 08:02 UTC" in text
-    assert "Длительность последнего прохода: 2 мин. 30 сек." in text
-    assert "Следующий опрос: 2026-03-11 08:17 UTC" in text
-    assert "Записей матчей: 2" in text
-    assert "Уникальных матчей: 2" in text
-    assert "Последний матч в БД: 2026-03-11 07:45 UTC" in text
+    assert "<b>Config</b>" in text
+    assert "Timezone: Europe/Moscow" in text
+    assert "Realtime paused: no" in text
+    assert "Poll interval: 15 min" in text
+    assert "Players: 2 (1 initialized)" in text
+    assert "<b>Polling</b>" in text
+    assert "State: ok" in text
+    assert "Last start: 2026-03-11 11:00 MSK" in text
+    assert "Last finish: 2026-03-11 11:02 MSK" in text
+    assert "Last success: 2026-03-11 11:02 MSK" in text
+    assert "Last run duration: 2 min 30 sec" in text
+    assert "Next poll: 2026-03-11 11:17 MSK" in text
+    assert "Last error: none" in text
+    assert "<b>Data</b>" in text
+    assert "Match rows: 2" in text
+    assert "Unique matches: 2" in text
+    assert "Latest match in DB: 2026-03-11 10:45 MSK" in text
+    assert "<b>Recent Reports</b>" in text
     assert (
-        "- day: 2026-03-11 08:05 UTC (auto, 2026-03-10 00:00 UTC .. 2026-03-11 00:00 UTC)" in text
+        "- day: 2026-03-11 11:05 MSK (auto, 2026-03-10 03:00 MSK .. 2026-03-11 03:00 MSK)"
+        in text
     )
-    assert "- week: -" in text
-    assert "- month: -" in text
-    assert "- mid (123456) · last_seen 1002" in text
-    assert "- Pablo (222222) · last_seen -" in text
+    assert "- week: none" in text
+    assert "- month: none" in text
+    assert "<b>Players</b>" in text
+    assert "- mid (123456) · last seen 1002" in text
+    assert "- Pablo (222222) · last seen not initialized" in text
+    assert message.answers[0][1]["parse_mode"] == "HTML"
 
     await engine.dispose()
 
@@ -364,7 +372,7 @@ async def test_report_handler_returns_html_report_for_filtered_player() -> None:
             telegram_chat_id=-1001,
             telegram_thread_id=10,
             title="Test topic",
-            timezone="UTC",
+            timezone="Europe/Moscow",
         )
         player = await PlayerRepository(session).get_or_create(
             dota_account_id=123456,
@@ -429,7 +437,7 @@ async def test_last_handler_groups_shared_match_into_single_block() -> None:
             telegram_chat_id=-1001,
             telegram_thread_id=10,
             title="Test topic",
-            timezone="UTC",
+            timezone="Europe/Moscow",
         )
         bigbaby = await PlayerRepository(session).get_or_create(
             dota_account_id=111111,
@@ -539,6 +547,7 @@ async def test_last_handler_groups_shared_match_into_single_block() -> None:
     assert "sega" in text
     assert "Crystal Maiden" in text
     assert "Muerta" not in text
+    assert "<b>Ended</b>: 2026-03-11 12:02 MSK (52 min)" in text
     assert text.count("<b>Ended</b>:") == 1
     assert text.count("Dotabuff") == 1
     assert message.answers[0][1]["parse_mode"] == "HTML"

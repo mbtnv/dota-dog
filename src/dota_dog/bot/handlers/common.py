@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from html import escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import Router
@@ -119,68 +120,79 @@ def _orm_to_snapshot(match: PlayerMatchORM) -> MatchSnapshot:
     )
 
 
-def _fmt_dt(value: datetime | None) -> str:
+def _fmt_dt(value: datetime | None, timezone_name: str = "UTC") -> str:
     if value is None:
         return "-"
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    try:
+        tz = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        tz = ZoneInfo("UTC")
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    localized = normalized.astimezone(tz)
+    tz_label = localized.tzname() or timezone_name
+    return localized.strftime("%Y-%m-%d %H:%M ") + tz_label
 
 
 def _fmt_duration(started_at: datetime | None, finished_at: datetime | None) -> str:
     if started_at is None or finished_at is None:
-        return "-"
+        return "none"
     total_seconds = max(0, int((finished_at - started_at).total_seconds()))
     minutes, seconds = divmod(total_seconds, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
-        return f"{hours} ч. {minutes} мин."
+        return f"{hours} h {minutes} min"
     if minutes:
-        return f"{minutes} мин. {seconds} сек."
-    return f"{seconds} сек."
+        return f"{minutes} min {seconds} sec"
+    return f"{seconds} sec"
 
 
 def _runtime_state_label(runtime_status: TopicRuntimeStatus | None) -> str:
     if runtime_status is None or runtime_status.last_poll_started_at is None:
-        return "еще не запускался"
+        return "not started"
     if runtime_status.last_poll_finished_at is None:
-        return "выполняется"
+        return "running"
     if runtime_status.last_poll_started_at > runtime_status.last_poll_finished_at:
-        return "выполняется"
+        return "running"
     if runtime_status.last_poll_error:
-        return "ошибка"
+        return "error"
     return "ok"
 
 
-def _format_report_runs(report_runs: list[ReportRunSummary]) -> list[str]:
+def _format_report_runs(report_runs: list[ReportRunSummary], timezone_name: str) -> list[str]:
     report_by_period = {report.period_type: report for report in report_runs}
     lines: list[str] = []
     for period_type in PeriodType:
         report = report_by_period.get(period_type)
         if report is None:
-            lines.append(f"- {period_type.value}: -")
+            lines.append(f"- {period_type.value}: none")
             continue
-        period_range = f"{_fmt_dt(report.period_start)} .. {_fmt_dt(report.period_end)}"
+        period_range = (
+            f"{_fmt_dt(report.period_start, timezone_name)} .. "
+            f"{_fmt_dt(report.period_end, timezone_name)}"
+        )
         lines.append(
-            f"- {period_type.value}: {_fmt_dt(report.created_at)} "
-            f"({report.trigger_source}, {period_range})"
+            f"- {period_type.value}: {_fmt_dt(report.created_at, timezone_name)} "
+            f"({escape(report.trigger_source)}, {period_range})"
         )
     return lines
 
 
 def _format_player_status_lines(players: list[TrackedPlayerRef]) -> list[str]:
     if not players:
-        return ["- нет игроков"]
+        return ["- none"]
     ordered_players = sorted(
         players,
         key=lambda player: (player.alias or player.display_name).lower(),
     )
     lines = []
     for player in ordered_players[:10]:
-        label = player.alias or player.display_name
+        label = escape(player.alias or player.display_name)
+        last_seen = str(player.last_seen_match_id) if player.last_seen_match_id is not None else "not initialized"
         lines.append(
-            f"- {label} ({player.dota_account_id}) · last_seen {player.last_seen_match_id or '-'}"
+            f"- {label} ({player.dota_account_id}) · last seen {last_seen}"
         )
     if len(ordered_players) > 10:
-        lines.append(f"- ... и еще {len(ordered_players) - 10}")
+        lines.append(f"- ... and {len(ordered_players) - 10} more")
     return lines
 
 
@@ -205,37 +217,41 @@ def _build_status_text(
     last_poll_succeeded_at = runtime_status.last_poll_succeeded_at if runtime_status else None
     last_poll_error = runtime_status.last_poll_error if runtime_status else None
     last_poll_duration = _fmt_duration(last_poll_started_at, last_poll_finished_at)
+    title = escape(topic_title) if topic_title else "none"
+    timezone_label = escape(timezone_name)
+    thread_label = str(thread_id) if thread_id is not None else "none"
+    last_error = escape(last_poll_error) if last_poll_error else "none"
     lines = [
-        "Статус topic:",
-        f"Название: {topic_title or '-'}",
+        "<b>Topic Status</b>",
+        f"Title: {title}",
         f"Chat ID: {chat_id}",
-        f"Thread ID: {thread_id if thread_id is not None else '-'}",
-        f"Создан: {_fmt_dt(created_at)}",
+        f"Thread ID: {thread_label}",
+        f"Created: {_fmt_dt(created_at, timezone_name)}",
         "",
-        "Конфиг:",
-        f"Таймзона: {timezone_name}",
-        f"Realtime на паузе: {'да' if is_paused else 'нет'}",
-        f"Интервал опроса: {poll_interval_minutes} мин.",
-        f"Игроков: {len(players)} ({initialized_players} инициализировано)",
+        "<b>Config</b>",
+        f"Timezone: {timezone_label}",
+        f"Realtime paused: {'yes' if is_paused else 'no'}",
+        f"Poll interval: {poll_interval_minutes} min",
+        f"Players: {len(players)} ({initialized_players} initialized)",
         "",
-        "Опрос:",
-        f"Состояние: {_runtime_state_label(runtime_status)}",
-        f"Последний старт: {_fmt_dt(last_poll_started_at)}",
-        f"Последнее завершение: {_fmt_dt(last_poll_finished_at)}",
-        f"Последний успех: {_fmt_dt(last_poll_succeeded_at)}",
-        f"Длительность последнего прохода: {last_poll_duration}",
-        f"Следующий опрос: {_fmt_dt(next_poll_at)}",
-        f"Последняя ошибка: {last_poll_error or '-'}",
+        "<b>Polling</b>",
+        f"State: {_runtime_state_label(runtime_status)}",
+        f"Last start: {_fmt_dt(last_poll_started_at, timezone_name)}",
+        f"Last finish: {_fmt_dt(last_poll_finished_at, timezone_name)}",
+        f"Last success: {_fmt_dt(last_poll_succeeded_at, timezone_name)}",
+        f"Last run duration: {last_poll_duration}",
+        f"Next poll: {_fmt_dt(next_poll_at, timezone_name)}",
+        f"Last error: {last_error}",
         "",
-        "Данные:",
-        f"Записей матчей: {matches_overview.total_rows}",
-        f"Уникальных матчей: {matches_overview.unique_matches}",
-        f"Последний матч в БД: {_fmt_dt(matches_overview.last_match_end_at)}",
+        "<b>Data</b>",
+        f"Match rows: {matches_overview.total_rows}",
+        f"Unique matches: {matches_overview.unique_matches}",
+        f"Latest match in DB: {_fmt_dt(matches_overview.last_match_end_at, timezone_name)}",
         "",
-        "Последние отчеты:",
-        *_format_report_runs(report_runs),
+        "<b>Recent Reports</b>",
+        *_format_report_runs(report_runs, timezone_name),
         "",
-        "Игроки:",
+        "<b>Players</b>",
         *_format_player_status_lines(players),
     ]
     return "\n".join(lines)
@@ -460,7 +476,7 @@ async def track_handler(message: Message, deps: HandlerDependencies) -> None:
 @router.message(Command("status"))
 async def status_handler(message: Message, deps: HandlerDependencies) -> None:
     if not _is_group_message(message):
-        await message.answer("Команда доступна только в группе или topic.")
+        await message.answer("This command is only available in a group or topic.")
         return
     async with deps.session_factory() as session:
         topic = await TopicRepository(session).get_by_chat_thread(
@@ -468,7 +484,7 @@ async def status_handler(message: Message, deps: HandlerDependencies) -> None:
             message.message_thread_id,
         )
         if topic is None:
-            await message.answer("Topic еще не инициализирован.")
+            await message.answer("Topic is not initialized yet.")
             return
         topic_players_repo = TopicPlayerRepository(session)
         players = await topic_players_repo.list_topic_players(topic.id)
@@ -501,7 +517,8 @@ async def status_handler(message: Message, deps: HandlerDependencies) -> None:
             next_poll_at=next_poll_at,
             matches_overview=matches_overview,
             report_runs=report_runs,
-        )
+        ),
+        parse_mode="HTML",
     )
 
 
@@ -705,7 +722,12 @@ async def last_handler(message: Message, deps: HandlerDependencies) -> None:
         matches=orm_matches,
         players=ordered_players,
     )
-    text = deps.formatter.format_recent_matches("Last matches", items, constants)
+    text = deps.formatter.format_recent_matches(
+        "Last matches",
+        items,
+        constants,
+        topic.timezone,
+    )
     await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
 
 
