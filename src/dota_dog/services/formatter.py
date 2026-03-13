@@ -15,7 +15,7 @@ HERO_NAMES = {
 GAME_MODES = {
     1: "All Pick",
     2: "Captains Mode",
-    22: "All Draft",
+    22: "All Pick",
     23: "Turbo",
 }
 
@@ -43,19 +43,21 @@ class MessageFormatter:
     ) -> str:
         profile_url = player.profile_url or dotabuff_profile_url(player.dota_account_id)
         hero = self._hero_name(match.hero_id, constants)
-        outcome = "Win" if match.is_win else "Lose"
+        outcome = self._format_outcome(match.is_win)
         ended_at = match.end_time.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
         duration_minutes = int(match.duration.total_seconds() // 60)
         parts = [
             f"<b>{escape(player.alias or player.display_name)}</b> · "
             f'<a href="{escape(profile_url)}">profile</a>',
-            f"<b>{outcome}</b> · {escape(hero)}",
-            f"KDA: {match.kills}/{match.deaths}/{match.assists}",
-            f"Ended: {ended_at} ({duration_minutes} min)",
-            f"GPM/XPM: {match.gpm}/{match.xpm}",
-            f"HD/TD/HH: {match.hero_damage}/{match.tower_damage}/{match.hero_healing}",
-            f"Last hits: {match.last_hits}",
-            f"Mode: {self._game_mode_name(match.game_mode, constants)} · "
+            f"{outcome} · {escape(hero)}",
+            f"<b>KDA</b>: {match.kills}/{match.deaths}/{match.assists}",
+            f"<b>Ended</b>: {ended_at} ({duration_minutes} min)",
+            f"<b>GPM/XPM</b>: {match.gpm} / {match.xpm}",
+            f"<b>HD/TD/HH</b>: {self._format_k_value(match.hero_damage)} / "
+            f"{self._format_k_value(match.tower_damage)} / "
+            f"{self._format_k_value(match.hero_healing)}",
+            f"<b>Last hits</b>: {match.last_hits}",
+            f"<b>Mode</b>: {self._game_mode_name(match.game_mode, constants)} · "
             f"{self._lobby_type_name(match.lobby_type, constants)}"
             f"{self._format_party(match.party_size)}",
             f'<a href="{dotabuff_match_url(match.match_id)}">Dotabuff</a>',
@@ -143,14 +145,14 @@ class MessageFormatter:
         labels = ", ".join(escape(player.alias or player.display_name) for player, _ in group)
         parts = [
             f"<b>{labels}</b>",
-            f"Ended: {ended_at} ({duration_minutes} min)",
-            f"Mode: {self._game_mode_name(first_match.game_mode, constants)} · "
+            f"<b>Ended</b>: {ended_at} ({duration_minutes} min)",
+            f"<b>Mode</b>: {self._game_mode_name(first_match.game_mode, constants)} · "
             f"{self._lobby_type_name(first_match.lobby_type, constants)}",
         ]
         for player, match in group:
             profile_url = player.profile_url or dotabuff_profile_url(player.dota_account_id)
             hero = self._hero_name(match.hero_id, constants)
-            outcome = "Win" if match.is_win else "Lose"
+            outcome = self._format_outcome(match.is_win)
             parts.append(
                 f"<b>{escape(player.alias or player.display_name)}</b> · "
                 f'<a href="{escape(profile_url)}">profile</a> · '
@@ -158,11 +160,15 @@ class MessageFormatter:
                 f"{self._format_party(match.party_size)}"
             )
             parts.append(
-                f"KDA: {match.kills}/{match.deaths}/{match.assists} | "
-                f"GPM/XPM: {match.gpm}/{match.xpm} | "
-                f"Last hits: {match.last_hits}"
+                f"<b>KDA</b>: {match.kills}/{match.deaths}/{match.assists} | "
+                f"<b>GPM/XPM</b>: {match.gpm} / {match.xpm} | "
+                f"<b>Last hits</b>: {match.last_hits}"
             )
-            parts.append(f"HD/TD/HH: {match.hero_damage}/{match.tower_damage}/{match.hero_healing}")
+            parts.append(
+                f"<b>HD/TD/HH</b>: {self._format_k_value(match.hero_damage)} / "
+                f"{self._format_k_value(match.tower_damage)} / "
+                f"{self._format_k_value(match.hero_healing)}"
+            )
         parts.append(f'<a href="{dotabuff_match_url(first_match.match_id)}">Dotabuff</a>')
         return "\n".join(parts)
 
@@ -183,3 +189,11 @@ class MessageFormatter:
         if constants is not None and lobby_type in constants.lobby_types:
             return constants.lobby_types[lobby_type]
         return LOBBY_TYPES.get(lobby_type, str(lobby_type))
+
+    @staticmethod
+    def _format_outcome(is_win: bool) -> str:
+        return "🟢<b>Win</b>" if is_win else "🔴<b>Lose</b>"
+
+    @staticmethod
+    def _format_k_value(value: int | float) -> str:
+        return f"{value / 1000:.1f}K"

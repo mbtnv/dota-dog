@@ -539,7 +539,7 @@ async def test_last_handler_groups_shared_match_into_single_block() -> None:
     assert "sega" in text
     assert "Crystal Maiden" in text
     assert "Muerta" not in text
-    assert text.count("Ended:") == 1
+    assert text.count("<b>Ended</b>:") == 1
     assert text.count("Dotabuff") == 1
     assert message.answers[0][1]["parse_mode"] == "HTML"
     assert message.answers[0][1]["disable_web_page_preview"] is True
