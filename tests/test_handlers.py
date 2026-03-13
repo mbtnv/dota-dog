@@ -347,8 +347,7 @@ async def test_status_handler_returns_extended_topic_summary() -> None:
     assert "Latest match in DB: 2026-03-11 10:45 MSK" in text
     assert "<b>Recent Reports</b>" in text
     assert (
-        "- day: 2026-03-11 11:05 MSK (auto, 2026-03-10 03:00 MSK .. 2026-03-11 03:00 MSK)"
-        in text
+        "- day: 2026-03-11 11:05 MSK (auto, 2026-03-10 03:00 MSK .. 2026-03-11 03:00 MSK)" in text
     )
     assert "- week: none" in text
     assert "- month: none" in text

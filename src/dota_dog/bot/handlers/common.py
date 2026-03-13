@@ -187,10 +187,12 @@ def _format_player_status_lines(players: list[TrackedPlayerRef]) -> list[str]:
     lines = []
     for player in ordered_players[:10]:
         label = escape(player.alias or player.display_name)
-        last_seen = str(player.last_seen_match_id) if player.last_seen_match_id is not None else "not initialized"
-        lines.append(
-            f"- {label} ({player.dota_account_id}) · last seen {last_seen}"
+        last_seen = (
+            str(player.last_seen_match_id)
+            if player.last_seen_match_id is not None
+            else "not initialized"
         )
+        lines.append(f"- {label} ({player.dota_account_id}) · last seen {last_seen}")
     if len(ordered_players) > 10:
         lines.append(f"- ... and {len(ordered_players) - 10} more")
     return lines
