@@ -97,6 +97,8 @@ class SendReportsJob:
                     players=players,
                     matches=[_orm_to_snapshot(match) for match in orm_matches],
                 )
+                if period_type == PeriodType.DAY:
+                    summaries = [summary for summary in summaries if summary.matches_count > 0]
                 text = self._formatter.format_report_bundle(
                     title=f"{period_type.value.title()} report",
                     summaries=summaries,

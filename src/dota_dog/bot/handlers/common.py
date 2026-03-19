@@ -574,13 +574,17 @@ async def report_handler(message: Message, deps: HandlerDependencies) -> None:
         if not players:
             await message.answer("В этом topic нет отслеживаемых игроков.")
             return
+        selected_players = deps.reporting_service.select_players(players, player_filter)
+        if player_filter is not None and not selected_players:
+            await message.answer("Игрок для отчета не найден в этом topic.")
+            return
         period_start, period_end = deps.reporting_service.calculate_period_bounds(
             period_type=period_type,
             now=datetime.now(UTC),
             timezone_name=topic.timezone,
         )
         orm_matches = await MatchRepository(session).list_matches_for_players(
-            [player.player_id for player in players],
+            [player.player_id for player in selected_players],
             period_start,
             period_end,
         )
@@ -589,13 +593,12 @@ async def report_handler(message: Message, deps: HandlerDependencies) -> None:
         period_type=period_type,
         period_start=period_start,
         period_end=period_end,
-        players=players,
+        players=selected_players,
         matches=[_orm_to_snapshot(match) for match in orm_matches],
-        player_filter=player_filter,
+        player_filter=None,
     )
-    if player_filter is not None and not summaries:
-        await message.answer("Игрок для отчета не найден в этом topic.")
-        return
+    if period_type == PeriodType.DAY:
+        summaries = [summary for summary in summaries if summary.matches_count > 0]
     if not summaries:
         await message.answer("Для выбранного периода данных нет.")
         return

@@ -113,3 +113,90 @@ async def test_send_reports_job_is_idempotent_for_same_period() -> None:
     assert has_run is True
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_send_reports_job_skips_zero_match_players_in_day_report() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    reporting = ReportingService()
+    now = datetime.now(UTC)
+    period_start, period_end = reporting.previous_period_bounds(PeriodType.DAY, now, "UTC")
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=1,
+            telegram_thread_id=10,
+            title="Test",
+            timezone="UTC",
+        )
+        active_player = await PlayerRepository(session).get_or_create(
+            dota_account_id=123,
+            display_name="Sega",
+            profile_url=None,
+        )
+        inactive_player = await PlayerRepository(session).get_or_create(
+            dota_account_id=456,
+            display_name="Korm",
+            profile_url=None,
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=active_player.id,
+            alias="mid",
+            added_by_telegram_user_id=99,
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=inactive_player.id,
+            alias="support",
+            added_by_telegram_user_id=99,
+        )
+        session.add(
+            PlayerMatchORM(
+                player_id=active_player.id,
+                match_id=1001,
+                start_time=period_start,
+                end_time=period_start.replace(hour=1),
+                hero_id=74,
+                radiant_win=True,
+                player_slot=0,
+                kills=10,
+                deaths=2,
+                assists=9,
+                gpm=700,
+                xpm=800,
+                hero_damage=21000,
+                tower_damage=5000,
+                hero_healing=0,
+                last_hits=250,
+                game_mode=22,
+                lobby_type=7,
+                party_size=1,
+                raw_payload={},
+                created_at=period_end,
+            )
+        )
+        await session.commit()
+
+    sender = FakeTelegramSender()
+    job = SendReportsJob(
+        session_factory=session_factory,
+        constants_service=ConstantsService(sync_interval_hours=24),
+        reporting_service=reporting,
+        formatter=MessageFormatter(),
+        sender=sender,
+    )
+
+    messages = await job.run_once(PeriodType.DAY)
+
+    assert len(messages) == 1
+    assert "mid" in messages[0]
+    assert "support" not in messages[0]
+    assert len(sender.sent) == 1
+    assert "support" not in sender.sent[0][1]
+
+    await engine.dispose()

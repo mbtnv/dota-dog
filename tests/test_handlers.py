@@ -425,6 +425,84 @@ async def test_report_handler_returns_html_report_for_filtered_player() -> None:
 
 
 @pytest.mark.asyncio
+async def test_report_handler_skips_zero_match_players_in_day_report() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="UTC",
+        )
+        active_player = await PlayerRepository(session).get_or_create(
+            dota_account_id=123456,
+            display_name="Sega",
+            profile_url="https://www.dotabuff.com/players/123456",
+        )
+        inactive_player = await PlayerRepository(session).get_or_create(
+            dota_account_id=999999,
+            display_name="Korm",
+            profile_url="https://www.dotabuff.com/players/999999",
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=active_player.id,
+            alias="Sega",
+            added_by_telegram_user_id=1,
+        )
+        await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=inactive_player.id,
+            alias="Korm",
+            added_by_telegram_user_id=1,
+        )
+        session.add(
+            PlayerMatchORM(
+                player_id=active_player.id,
+                match_id=1001,
+                start_time=datetime(2026, 3, 19, 12, 0, tzinfo=UTC),
+                end_time=datetime(2026, 3, 19, 12, 30, tzinfo=UTC),
+                hero_id=74,
+                radiant_win=True,
+                player_slot=0,
+                kills=10,
+                deaths=2,
+                assists=9,
+                gpm=700,
+                xpm=800,
+                hero_damage=21000,
+                tower_damage=5000,
+                hero_healing=0,
+                last_hits=250,
+                game_mode=22,
+                lobby_type=7,
+                party_size=1,
+                raw_payload={},
+                created_at=datetime(2026, 3, 19, 12, 31, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/report day")
+
+    await report_handler(message, deps)
+
+    assert len(message.answers) == 1
+    report_text = message.answers[0][0]
+    assert "Sega" in report_text
+    assert "Matches: 1" in report_text
+    assert "Korm" not in report_text
+    assert message.answers[0][1]["parse_mode"] == "HTML"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_last_handler_groups_shared_match_into_single_block() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
