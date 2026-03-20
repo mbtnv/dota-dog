@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from aiogram import Bot
-
 from dota_dog.bootstrap import build_container
 from dota_dog.domain.enums import PeriodType
 from dota_dog.infra.db.runtime import check_database_connection
+from dota_dog.infra.telegram.bot import create_bot
 from dota_dog.infra.telegram.sender import TelegramSender
 from dota_dog.jobs.poll_matches import PollMatchesJob
 from dota_dog.jobs.send_reports import SendReportsJob
@@ -18,7 +17,7 @@ async def _run_forever() -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
     container = build_container(settings)
-    bot = Bot(token=settings.bot_token)
+    bot = create_bot(settings)
     sender = TelegramSender(
         bot,
         max_retries=settings.telegram_send_max_retries,

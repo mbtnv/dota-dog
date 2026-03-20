@@ -170,10 +170,35 @@ uv run python -m dota_dog.worker
 - `DEFAULT_TIMEZONE` - таймзона для новых topic.
 - `ALLOWED_TELEGRAM_USER_IDS` - список Telegram user id через запятую, которым разрешено управлять ботом.
 - `TELEGRAM_ADMIN_CHECK_ENABLED` - если `true`, управляющие команды доступны администраторам чата.
+- `TELEGRAM_PROXY_URL` - optional HTTP/SOCKS proxy только для запросов к Telegram Bot API, например `http://user:pass@proxy.example.com:8080`.
 - `OPENDOTA_API_KEY` - optional API key для OpenDota.
 - `LOG_LEVEL` - уровень логирования.
 
 Полный пример есть в [.env.example](.env.example).
+
+### Telegram через HTTP proxy
+
+Если до `api.telegram.org` с сервера не достучаться напрямую, можно отправить только Telegram-трафик через proxy, не меняя маршрутизацию для OpenDota и Postgres.
+
+1. Укажите в `.env`:
+
+```env
+TELEGRAM_PROXY_URL=http://username:password@proxy.example.com:8080
+```
+
+2. Пересоберите и перезапустите контейнеры:
+
+```bash
+docker compose up -d --build
+```
+
+3. Проверьте логи `bot`:
+
+```bash
+docker compose logs -f bot
+```
+
+Поддерживаются обычные proxy URL вида `http://...`, `https://...`, `socks4://...` и `socks5://...`.
 
 ## Импорт legacy-данных
 

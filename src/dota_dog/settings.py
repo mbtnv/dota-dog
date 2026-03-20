@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import cached_property
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,11 +24,19 @@ class Settings(BaseSettings):
     default_timezone: str = Field(default="UTC", alias="DEFAULT_TIMEZONE")
     allowed_telegram_user_ids: str = Field(default="", alias="ALLOWED_TELEGRAM_USER_IDS")
     telegram_admin_check_enabled: bool = Field(default=True, alias="TELEGRAM_ADMIN_CHECK_ENABLED")
+    telegram_proxy_url: str | None = Field(default=None, alias="TELEGRAM_PROXY_URL")
     opendota_max_retries: int = Field(default=3, alias="OPENDOTA_MAX_RETRIES")
     telegram_send_max_retries: int = Field(default=3, alias="TELEGRAM_SEND_MAX_RETRIES")
     retry_backoff_seconds: float = Field(default=1.0, alias="RETRY_BACKOFF_SECONDS")
     constants_sync_interval_hours: int = Field(default=24, alias="CONSTANTS_SYNC_INTERVAL_HOURS")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    @field_validator("telegram_proxy_url", mode="before")
+    @classmethod
+    def _normalize_optional_proxy(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @property
     def is_postgres(self) -> bool:

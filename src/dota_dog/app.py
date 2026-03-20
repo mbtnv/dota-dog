@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher
 
 from dota_dog.bootstrap import build_container
 from dota_dog.bot.handlers.common import HandlerDependencies, router
 from dota_dog.infra.db.runtime import check_database_connection
+from dota_dog.infra.telegram.bot import create_bot
 from dota_dog.logging import configure_logging
 from dota_dog.settings import load_settings
 
@@ -16,7 +17,7 @@ async def main() -> None:
     configure_logging(settings.log_level)
     container = build_container(settings)
     await check_database_connection(container.engine)
-    bot = Bot(token=settings.bot_token)
+    bot = create_bot(settings)
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     dispatcher["deps"] = HandlerDependencies(
