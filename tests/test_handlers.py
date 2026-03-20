@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -431,6 +431,11 @@ async def test_report_handler_skips_zero_match_players_in_day_report() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
+    reporting = ReportingService()
+    period_start, _ = reporting.calculate_period_bounds(PeriodType.DAY, datetime.now(UTC), "UTC")
+    match_start = period_start + timedelta(hours=12)
+    match_end = match_start + timedelta(minutes=30)
+
     async with session_factory() as session:
         topic = await TopicRepository(session).get_or_create(
             telegram_chat_id=-1001,
@@ -464,8 +469,8 @@ async def test_report_handler_skips_zero_match_players_in_day_report() -> None:
             PlayerMatchORM(
                 player_id=active_player.id,
                 match_id=1001,
-                start_time=datetime(2026, 3, 19, 12, 0, tzinfo=UTC),
-                end_time=datetime(2026, 3, 19, 12, 30, tzinfo=UTC),
+                start_time=match_start,
+                end_time=match_end,
                 hero_id=74,
                 radiant_win=True,
                 player_slot=0,
@@ -482,7 +487,7 @@ async def test_report_handler_skips_zero_match_players_in_day_report() -> None:
                 lobby_type=7,
                 party_size=1,
                 raw_payload={},
-                created_at=datetime(2026, 3, 19, 12, 31, tzinfo=UTC),
+                created_at=match_end + timedelta(minutes=1),
             )
         )
         await session.commit()
