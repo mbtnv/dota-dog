@@ -6,7 +6,7 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from dota_dog.domain.models import TrackedTopicRef
+from dota_dog.domain.models import MatchSnapshot, TrackedPlayerRef, TrackedTopicRef
 from dota_dog.infra.db.repositories.core import (
     MatchRepository,
     TopicPlayerRepository,
@@ -63,6 +63,11 @@ class PollMatchesJob:
                 await topic_runtime_repo.mark_started(topic.id, started_at)
                 try:
                     players = await topic_players_repo.list_topic_players(topic.id)
+                    player_order = {player.player_id: index for index, player in enumerate(players)}
+                    fresh_matches_by_match_id: dict[
+                        int, list[tuple[TrackedPlayerRef, MatchSnapshot]]
+                    ] = {}
+                    notification_match_order: list[int] = []
                     for player in players:
                         recent_matches = list(
                             await self._opendota_client.get_recent_matches(player.dota_account_id)
@@ -87,14 +92,10 @@ class PollMatchesJob:
                             continue
                         fresh_snapshots = await match_repo.save_new_matches(snapshots)
                         for snapshot in fresh_snapshots:
-                            text = self._formatter.format_match_notification(
-                                player,
-                                snapshot,
-                                constants,
-                                topic.timezone,
-                            )
-                            await self._sender.send_to_topic(topic, text)
-                            messages.append(text)
+                            if snapshot.match_id not in fresh_matches_by_match_id:
+                                fresh_matches_by_match_id[snapshot.match_id] = []
+                                notification_match_order.append(snapshot.match_id)
+                            fresh_matches_by_match_id[snapshot.match_id].append((player, snapshot))
                         next_match_id = self._tracking_service.next_last_seen_match_id(
                             player,
                             snapshots,
@@ -105,6 +106,18 @@ class PollMatchesJob:
                                 player.player_id,
                                 next_match_id,
                             )
+                    for match_id in notification_match_order:
+                        group = sorted(
+                            fresh_matches_by_match_id[match_id],
+                            key=lambda item: player_order[item[0].player_id],
+                        )
+                        text = self._formatter.format_match_group_notification(
+                            group,
+                            constants,
+                            topic.timezone,
+                        )
+                        await self._sender.send_to_topic(topic, text)
+                        messages.append(text)
                     await topic_runtime_repo.mark_succeeded(
                         topic.id,
                         started_at=started_at,

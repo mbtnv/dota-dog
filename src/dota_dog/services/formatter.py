@@ -66,6 +66,17 @@ class MessageFormatter:
         ]
         return "\n".join(parts)
 
+    def format_match_group_notification(
+        self,
+        group: list[tuple[TrackedPlayerRef, MatchSnapshot]],
+        constants: ConstantSnapshot | None = None,
+        timezone_name: str = "UTC",
+    ) -> str:
+        if len(group) == 1:
+            player, match = group[0]
+            return self.format_match_notification(player, match, constants, timezone_name)
+        return self._format_recent_match_group(group, constants, timezone_name)
+
     def format_report(
         self,
         summary: ReportSummary,
@@ -187,14 +198,26 @@ class MessageFormatter:
     @staticmethod
     def _game_mode_name(game_mode: int, constants: ConstantSnapshot | None) -> str:
         if constants is not None and game_mode in constants.game_modes:
-            return constants.game_modes[game_mode]
-        return GAME_MODES.get(game_mode, str(game_mode))
+            return MessageFormatter._normalize_game_mode_name(
+                game_mode,
+                constants.game_modes[game_mode],
+            )
+        return MessageFormatter._normalize_game_mode_name(
+            game_mode,
+            GAME_MODES.get(game_mode, str(game_mode)),
+        )
 
     @staticmethod
     def _lobby_type_name(lobby_type: int, constants: ConstantSnapshot | None) -> str:
         if constants is not None and lobby_type in constants.lobby_types:
             return constants.lobby_types[lobby_type]
         return LOBBY_TYPES.get(lobby_type, str(lobby_type))
+
+    @staticmethod
+    def _normalize_game_mode_name(game_mode: int, name: str) -> str:
+        if game_mode == 22:
+            return "All Pick"
+        return name
 
     @staticmethod
     def _format_outcome(is_win: bool) -> str:

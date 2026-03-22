@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from dota_dog.domain.models import MatchSnapshot, TrackedPlayerRef
+from dota_dog.domain.models import ConstantSnapshot, MatchSnapshot, TrackedPlayerRef
 from dota_dog.services.formatter import MessageFormatter
 
 
@@ -170,6 +170,46 @@ def test_format_match_notification_uses_all_pick_for_game_mode_22_without_consta
     )
 
     message = formatter.format_match_notification(player, match)
+
+    assert "<b>Mode</b>: All Pick · Ranked" in message
+
+
+def test_format_match_notification_normalizes_all_draft_from_constants() -> None:
+    formatter = MessageFormatter()
+    player = TrackedPlayerRef(
+        player_id=1,
+        dota_account_id=123,
+        display_name="Sega",
+        profile_url=None,
+        alias="Sega",
+        last_seen_match_id=1,
+    )
+    ended_at = datetime(2026, 3, 13, 8, 41, tzinfo=UTC)
+    match = MatchSnapshot(
+        player_id=1,
+        match_id=1001,
+        start_time=ended_at - timedelta(minutes=26),
+        end_time=ended_at,
+        hero_id=14,
+        radiant_win=True,
+        player_slot=0,
+        kills=3,
+        deaths=3,
+        assists=8,
+        gpm=485,
+        xpm=449,
+        hero_damage=10856,
+        tower_damage=3927,
+        hero_healing=0,
+        last_hits=137,
+        game_mode=22,
+        lobby_type=7,
+        party_size=None,
+        raw_payload={},
+    )
+    constants = ConstantSnapshot(game_modes={22: "All Draft"})
+
+    message = formatter.format_match_notification(player, match, constants)
 
     assert "<b>Mode</b>: All Pick · Ranked" in message
 

@@ -12,7 +12,7 @@ class FakeConstantsClient:
         if resource == "heroes":
             return {"74": {"id": 74, "localized_name": "Invoker"}}
         if resource == "game_mode":
-            return {"22": {"id": 22, "name": "all_pick"}}
+            return {"22": {"id": 22, "name": "all_draft"}}
         return {"7": {"id": 7, "name": "ranked"}}
 
 

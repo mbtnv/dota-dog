@@ -51,7 +51,7 @@ class ConstantsService:
                 continue
             code = int(raw_code)
             normalized_payload = {str(key): value for key, value in raw_value.items()}
-            name = self._extract_name(resource, normalized_payload)
+            name = self._extract_name(resource, code, normalized_payload)
             entries.append(
                 ConstantEntry(
                     resource=resource,
@@ -62,16 +62,25 @@ class ConstantsService:
             )
         return entries
 
-    def _extract_name(self, resource: ConstantResource, payload: dict[str, object]) -> str:
+    def _extract_name(
+        self,
+        resource: ConstantResource,
+        code: int,
+        payload: dict[str, object],
+    ) -> str:
         if resource == ConstantResource.HEROES:
             localized = payload.get("localized_name")
             if isinstance(localized, str) and localized:
-                return localized
+                return self._normalize_name(resource, code, localized)
         for candidate_key in ("name", "localized_name"):
             candidate = payload.get(candidate_key)
             if isinstance(candidate, str) and candidate:
-                return self._humanize_name(candidate)
-        return "Unknown"
+                return self._normalize_name(
+                    resource,
+                    code,
+                    self._humanize_name(candidate),
+                )
+        return self._normalize_name(resource, code, "Unknown")
 
     @staticmethod
     def _humanize_name(value: str) -> str:
@@ -83,3 +92,9 @@ class ConstantsService:
                 break
         cleaned = cleaned.replace("_", " ").strip()
         return cleaned.title() if cleaned else value
+
+    @staticmethod
+    def _normalize_name(resource: ConstantResource, code: int, name: str) -> str:
+        if resource == ConstantResource.GAME_MODE and code == 22:
+            return "All Pick"
+        return name
