@@ -30,9 +30,7 @@ class FakeOpenDotaClient:
     ) -> None:
         self._matches = matches if matches is not None else []
         self._matches_by_account_id = matches_by_account_id or {}
-        default_game_modes_payload: dict[str, object] = {
-            "22": {"id": 22, "name": "All Pick"}
-        }
+        default_game_modes_payload: dict[str, object] = {"22": {"id": 22, "name": "All Pick"}}
         self._game_modes_payload: dict[str, object] = (
             game_modes_payload if game_modes_payload is not None else default_game_modes_payload
         )
