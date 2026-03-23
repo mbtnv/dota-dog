@@ -30,6 +30,7 @@ from dota_dog.infra.db.repositories.core import (
     TopicRuntimeRepository,
 )
 from dota_dog.infra.opendota.client import OpenDotaClient
+from dota_dog.infra.telegram.messages import split_html_message, split_html_sections
 from dota_dog.services.backfill import BackfillService
 from dota_dog.services.constants import ConstantsService
 from dota_dog.services.formatter import MessageFormatter
@@ -93,6 +94,29 @@ class HandlerDependencies:
 
 def _is_group_message(message: Message) -> bool:
     return message.chat.type in {"group", "supergroup"}
+
+
+async def _answer_html_chunks(message: Message, text: str) -> None:
+    for chunk in split_html_message(text):
+        await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
+
+
+async def _answer_html_sections(
+    message: Message,
+    header: str,
+    sections: list[str],
+    *,
+    empty_text: str | None = None,
+) -> None:
+    if not sections and empty_text is not None:
+        await message.answer(
+            f"{header}\n{empty_text}",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        return
+    for chunk in split_html_sections(header, sections):
+        await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
 
 def _orm_to_snapshot(match: PlayerMatchORM) -> MatchSnapshot:
@@ -603,7 +627,7 @@ async def report_handler(message: Message, deps: HandlerDependencies) -> None:
         await message.answer("Для выбранного периода данных нет.")
         return
     text = "\n\n".join(deps.formatter.format_report(summary, constants) for summary in summaries)
-    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+    await _answer_html_chunks(message, text)
 
 
 @router.message(Command("pause"))
@@ -727,13 +751,17 @@ async def last_handler(message: Message, deps: HandlerDependencies) -> None:
         matches=orm_matches,
         players=ordered_players,
     )
-    text = deps.formatter.format_recent_matches(
-        "Last matches",
+    sections = deps.formatter.format_recent_match_sections(
         items,
         constants,
         topic.timezone,
     )
-    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+    await _answer_html_sections(
+        message,
+        "<b>Last matches</b>",
+        sections,
+        empty_text="No matches.",
+    )
 
 
 @router.message(Command("leaders"))
@@ -780,7 +808,7 @@ async def leaders_handler(message: Message, deps: HandlerDependencies) -> None:
         title=f"Leaders {period_type.value}",
         summaries=summaries[:10],
     )
-    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+    await _answer_html_chunks(message, text)
 
 
 @router.message(Command("resync"))

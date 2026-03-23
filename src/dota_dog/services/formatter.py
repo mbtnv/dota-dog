@@ -128,10 +128,16 @@ class MessageFormatter:
         header = f"<b>{escape(title)}</b>"
         if not items:
             return f"{header}\nNo matches."
-        body = "\n\n".join(
-            self._format_recent_match_group(group, constants, timezone_name) for group in items
-        )
+        body = "\n\n".join(self.format_recent_match_sections(items, constants, timezone_name))
         return f"{header}\n\n{body}"
+
+    def format_recent_match_sections(
+        self,
+        items: list[list[tuple[TrackedPlayerRef, MatchSnapshot]]],
+        constants: ConstantSnapshot | None = None,
+        timezone_name: str = "UTC",
+    ) -> list[str]:
+        return [self._format_recent_match_group(group, constants, timezone_name) for group in items]
 
     def format_leaderboard(self, title: str, summaries: list[ReportSummary]) -> str:
         header = f"<b>{escape(title)}</b>"

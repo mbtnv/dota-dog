@@ -6,6 +6,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 
 from dota_dog.domain.models import TrackedTopicRef
+from dota_dog.infra.telegram.messages import split_html_message
 
 
 class TelegramSender:
@@ -23,13 +24,14 @@ class TelegramSender:
     async def send_to_topic(self, topic: TrackedTopicRef, text: str) -> None:
         for attempt in range(1, self._max_retries + 1):
             try:
-                await self._bot.send_message(
-                    chat_id=topic.telegram_chat_id,
-                    message_thread_id=topic.telegram_thread_id,
-                    text=text,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
+                for chunk in split_html_message(text):
+                    await self._bot.send_message(
+                        chat_id=topic.telegram_chat_id,
+                        message_thread_id=topic.telegram_thread_id,
+                        text=chunk,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
                 return
             except TelegramRetryAfter as exc:
                 if attempt == self._max_retries:

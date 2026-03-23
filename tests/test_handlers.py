@@ -744,6 +744,93 @@ async def test_last_handler_keeps_shared_players_when_filtered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_last_handler_splits_long_html_response() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=-1001,
+            telegram_thread_id=10,
+            title="Test topic",
+            timezone="UTC",
+        )
+        expected_blocks: dict[int, tuple[str, str]] = {}
+
+        for match_index in range(10):
+            match_id = 3001 + match_index
+            end_time = datetime(2026, 3, 11, 9, 2, tzinfo=UTC) - timedelta(hours=match_index)
+            alias_a = f"match-{match_index}-alpha-{'x' * 120}"
+            alias_b = f"match-{match_index}-beta-{'y' * 120}"
+            expected_blocks[match_id] = (alias_a, alias_b)
+
+            for player_offset, alias in enumerate((alias_a, alias_b)):
+                account_id = 500000 + match_index * 10 + player_offset
+                player = await PlayerRepository(session).get_or_create(
+                    dota_account_id=account_id,
+                    display_name=alias,
+                    profile_url=f"https://www.dotabuff.com/players/{account_id}",
+                )
+                await TopicPlayerRepository(session).add_player(
+                    topic_id=topic.id,
+                    player_id=player.id,
+                    alias=alias,
+                    added_by_telegram_user_id=1,
+                )
+                session.add(
+                    PlayerMatchORM(
+                        player_id=player.id,
+                        match_id=match_id,
+                        start_time=end_time - timedelta(minutes=52),
+                        end_time=end_time,
+                        hero_id=74 if player_offset == 0 else 5,
+                        radiant_win=player_offset == 0,
+                        player_slot=0,
+                        kills=10 + match_index + player_offset,
+                        deaths=2,
+                        assists=15,
+                        gpm=425,
+                        xpm=700,
+                        hero_damage=27187,
+                        tower_damage=1687,
+                        hero_healing=1200,
+                        last_hits=185,
+                        game_mode=22,
+                        lobby_type=7,
+                        party_size=2,
+                        raw_payload={},
+                        created_at=end_time + timedelta(minutes=1),
+                    )
+                )
+        await session.commit()
+
+    deps = _make_deps(session_factory)
+    message = FakeMessage(text="/last 10")
+
+    await last_handler(message, deps)
+
+    assert len(message.answers) > 1
+    assert all(answer_kwargs["parse_mode"] == "HTML" for _, answer_kwargs in message.answers)
+    assert all(
+        answer_kwargs["disable_web_page_preview"] is True for _, answer_kwargs in message.answers
+    )
+    combined_text = "\n".join(text for text, _ in message.answers)
+    assert combined_text.count("Dotabuff") == 10
+
+    for match_id, aliases in expected_blocks.items():
+        match_link = f"https://www.dotabuff.com/matches/{match_id}"
+        containing_answers = [text for text, _ in message.answers if match_link in text]
+        assert len(containing_answers) == 1
+        match_answer = containing_answers[0]
+        assert aliases[0] in match_answer
+        assert aliases[1] in match_answer
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_resync_handler_reports_progress_and_result() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
