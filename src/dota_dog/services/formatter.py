@@ -5,6 +5,7 @@ from html import escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dota_dog.domain.models import ConstantSnapshot, MatchSnapshot, ReportSummary, TrackedPlayerRef
+from dota_dog.services.match_statistics import MatchStatisticsService
 
 HERO_NAMES = {
     1: "Anti-Mage",
@@ -36,6 +37,9 @@ def dotabuff_profile_url(account_id: int) -> str:
 
 
 class MessageFormatter:
+    def __init__(self, match_statistics: MatchStatisticsService | None = None) -> None:
+        self._match_statistics = match_statistics or MatchStatisticsService()
+
     def format_match_notification(
         self,
         player: TrackedPlayerRef,
@@ -52,7 +56,7 @@ class MessageFormatter:
             f"<b>{escape(player.alias or player.display_name)}</b> · "
             f'<a href="{escape(profile_url)}">profile</a>',
             f"{outcome} · {escape(hero)}",
-            f"<b>KDA</b>: {match.kills}/{match.deaths}/{match.assists}",
+            self._format_kda_line(match),
             f"<b>Ended</b>: {ended_at} ({duration_minutes} min)",
             f"<b>GPM/XPM</b>: {match.gpm} / {match.xpm}",
             f"<b>HD/TD/HH</b>: {self._format_k_value(match.hero_damage)} / "
@@ -177,7 +181,7 @@ class MessageFormatter:
                 f"{self._format_party(match.party_size)}"
             )
             parts.append(
-                f"<b>KDA</b>: {match.kills}/{match.deaths}/{match.assists} | "
+                f"{self._format_kda_line(match)} | "
                 f"<b>GPM/XPM</b>: {match.gpm} / {match.xpm} | "
                 f"<b>Last hits</b>: {match.last_hits}"
             )
@@ -222,6 +226,14 @@ class MessageFormatter:
     @staticmethod
     def _format_outcome(is_win: bool) -> str:
         return "🟢<b>Win</b>" if is_win else "🔴<b>Lose</b>"
+
+    def _format_kda_line(self, match: MatchSnapshot) -> str:
+        parts = [f"<b>KDA</b>: {match.kills}/{match.deaths}/{match.assists}"]
+        parts.extend(
+            f"<b>{escape(statistic.label)}</b>: {escape(statistic.value)}"
+            for statistic in self._match_statistics.calculate_custom_statistics(match)
+        )
+        return " | ".join(parts)
 
     @staticmethod
     def _format_k_value(value: int | float) -> str:

@@ -45,7 +45,7 @@ def test_format_match_notification_contains_required_fields() -> None:
     assert "mid" in message
     assert "🟢<b>Win</b>" in message
     assert "Invoker" in message
-    assert "<b>KDA</b>: 12/1/9" in message
+    assert "<b>KDA</b>: 12/1/9 | <b>Govnoedstvo</b>: 0%" in message
     assert "<b>GPM/XPM</b>: 700 / 800" in message
     assert "<b>HD/TD/HH</b>: 23.0K / 5.0K / 0.0K" in message
     assert "Dotabuff" in message
@@ -129,6 +129,7 @@ def test_format_recent_matches_groups_shared_players_into_one_block() -> None:
     assert "sega" in message
     assert "🔴<b>Lose</b>" in message
     assert "Crystal Maiden" in message
+    assert message.count("<b>Govnoedstvo</b>:") == 2
     assert "<b>GPM/XPM</b>: 425 / 700" in message
     assert "<b>HD/TD/HH</b>: 23.0K / 1.7K / 0.0K" in message
     assert message.count("<b>Ended</b>:") == 1

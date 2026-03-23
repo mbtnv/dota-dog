@@ -9,6 +9,7 @@ from dota_dog.infra.opendota.client import OpenDotaClient
 from dota_dog.services.backfill import BackfillService
 from dota_dog.services.constants import ConstantsService
 from dota_dog.services.formatter import MessageFormatter
+from dota_dog.services.match_statistics import MatchStatisticsService
 from dota_dog.services.permissions import PermissionService
 from dota_dog.services.reporting import ReportingService
 from dota_dog.services.tracking import TrackingService
@@ -35,6 +36,7 @@ class AppContainer:
 def build_container(settings: Settings) -> AppContainer:
     engine = create_engine(settings.database_url)
     tracking_service = TrackingService()
+    match_statistics_service = MatchStatisticsService()
     return AppContainer(
         engine=engine,
         session_factory=create_session_factory(engine),
@@ -44,7 +46,7 @@ def build_container(settings: Settings) -> AppContainer:
             max_retries=settings.opendota_max_retries,
             backoff_seconds=settings.retry_backoff_seconds,
         ),
-        formatter=MessageFormatter(),
+        formatter=MessageFormatter(match_statistics=match_statistics_service),
         constants_service=ConstantsService(
             sync_interval_hours=settings.constants_sync_interval_hours
         ),

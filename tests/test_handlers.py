@@ -632,6 +632,8 @@ async def test_last_handler_groups_shared_match_into_single_block() -> None:
     assert "<b>Ended</b>: 2026-03-11 12:02 MSK (52 min)" in text
     assert text.count("<b>Ended</b>:") == 1
     assert text.count("Dotabuff") == 1
+    assert "<b>Govnoedstvo</b>:" in text
+    assert text.count("<b>Govnoedstvo</b>:") == 2
     assert message.answers[0][1]["parse_mode"] == "HTML"
     assert message.answers[0][1]["disable_web_page_preview"] is True
 
@@ -736,6 +738,7 @@ async def test_last_handler_keeps_shared_players_when_filtered() -> None:
     assert "BIGBABY" in text
     assert "sega" in text
     assert text.count("Dotabuff") == 1
+    assert "<b>Govnoedstvo</b>:" in text
 
     await engine.dispose()
 
