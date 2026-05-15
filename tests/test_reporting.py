@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from dota_dog.domain.enums import PeriodType
 from dota_dog.domain.models import MatchSnapshot, TrackedPlayerRef
@@ -108,3 +109,31 @@ def test_build_topic_summaries_filters_by_alias() -> None:
 
     assert len(summaries) == 1
     assert summaries[0].label == "mid"
+
+
+def test_previous_day_bounds_keep_local_midnight_across_dst_start() -> None:
+    service = ReportingService()
+    tz = ZoneInfo("Europe/Berlin")
+
+    period_start, period_end = service.previous_period_bounds(
+        PeriodType.DAY,
+        datetime(2026, 3, 30, 12, tzinfo=UTC),
+        "Europe/Berlin",
+    )
+
+    assert period_start.astimezone(tz) == datetime(2026, 3, 29, tzinfo=tz)
+    assert period_end.astimezone(tz) == datetime(2026, 3, 30, tzinfo=tz)
+
+
+def test_previous_week_bounds_keep_local_midnight_across_dst_start() -> None:
+    service = ReportingService()
+    tz = ZoneInfo("Europe/Berlin")
+
+    period_start, period_end = service.previous_period_bounds(
+        PeriodType.WEEK,
+        datetime(2026, 3, 30, 12, tzinfo=UTC),
+        "Europe/Berlin",
+    )
+
+    assert period_start.astimezone(tz) == datetime(2026, 3, 23, tzinfo=tz)
+    assert period_end.astimezone(tz) == datetime(2026, 3, 30, tzinfo=tz)

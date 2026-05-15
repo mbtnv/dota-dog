@@ -12,6 +12,7 @@ from dota_dog.infra.db.repositories.core import (
     PlayerRepository,
     TopicPlayerRepository,
     TopicRepository,
+    TopicRuntimeRepository,
 )
 from dota_dog.infra.opendota.schemas import OpenDotaRecentMatch
 from dota_dog.jobs.poll_matches import PollMatchesJob
@@ -54,6 +55,18 @@ class FakeTelegramSender:
 
     async def send_to_topic(self, topic: TrackedTopicRef, text: str) -> None:
         self.sent.append((topic, text))
+
+
+class FailingTelegramSender:
+    async def send_to_topic(self, topic: TrackedTopicRef, text: str) -> None:
+        msg = "Telegram unavailable"
+        raise RuntimeError(msg)
+
+
+class FailingConstantsOpenDotaClient(FakeOpenDotaClient):
+    async def get_constants_resource(self, resource: str) -> dict[str, object]:
+        msg = "OpenDota constants unavailable"
+        raise TimeoutError(msg)
 
 
 def _recent_match(
@@ -208,6 +221,120 @@ async def test_poll_job_notifies_only_once_for_new_match() -> None:
     assert "<b>Ended</b>: 2026-03-10 03:00 MSK (30 min)" in first_run[0]
     assert "Dotabuff" in first_run[0]
     assert sorted(match.match_id for match in matches) == [1002]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_poll_job_rolls_back_last_seen_when_notification_fails() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=1,
+            telegram_thread_id=10,
+            title="Test",
+            timezone="Europe/Moscow",
+        )
+        player = await PlayerRepository(session).get_or_create(
+            dota_account_id=123,
+            display_name="Sega",
+            profile_url=None,
+        )
+        relation = await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=player.id,
+            alias="mid",
+            added_by_telegram_user_id=99,
+        )
+        assert relation is not None
+        relation.last_seen_match_id = 1001
+        await session.commit()
+
+    job = PollMatchesJob(
+        session_factory=session_factory,
+        opendota_client=FakeOpenDotaClient([_recent_match(1001), _recent_match(1002)]),
+        constants_service=ConstantsService(sync_interval_hours=24),
+        tracking_service=TrackingService(),
+        formatter=MessageFormatter(),
+        sender=FailingTelegramSender(),
+    )
+
+    messages = await job.run_once()
+
+    async with session_factory() as session:
+        matches = await MatchRepository(session).list_matches_for_players(
+            [player.id],
+            datetime(2026, 3, 1, tzinfo=UTC),
+            datetime(2026, 4, 1, tzinfo=UTC),
+        )
+        refs = await TopicPlayerRepository(session).list_topic_players(topic.id)
+        runtime_status = await TopicRuntimeRepository(session).get_status(topic.id)
+
+    assert messages == []
+    assert matches == []
+    assert refs[0].last_seen_match_id == 1001
+    assert runtime_status is not None
+    assert runtime_status.last_poll_error == "Telegram unavailable"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_poll_job_uses_cached_constants_when_constants_sync_fails() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        topic = await TopicRepository(session).get_or_create(
+            telegram_chat_id=1,
+            telegram_thread_id=10,
+            title="Test",
+            timezone="Europe/Moscow",
+        )
+        player = await PlayerRepository(session).get_or_create(
+            dota_account_id=123,
+            display_name="Sega",
+            profile_url=None,
+        )
+        relation = await TopicPlayerRepository(session).add_player(
+            topic_id=topic.id,
+            player_id=player.id,
+            alias="mid",
+            added_by_telegram_user_id=99,
+        )
+        assert relation is not None
+        relation.last_seen_match_id = 1001
+        await session.commit()
+
+    sender = FakeTelegramSender()
+    job = PollMatchesJob(
+        session_factory=session_factory,
+        opendota_client=FailingConstantsOpenDotaClient([_recent_match(1001), _recent_match(1002)]),
+        constants_service=ConstantsService(sync_interval_hours=24),
+        tracking_service=TrackingService(),
+        formatter=MessageFormatter(),
+        sender=sender,
+    )
+
+    messages = await job.run_once()
+
+    async with session_factory() as session:
+        refs = await TopicPlayerRepository(session).list_topic_players(topic.id)
+        runtime_status = await TopicRuntimeRepository(session).get_status(topic.id)
+
+    assert len(messages) == 1
+    assert len(sender.sent) == 1
+    assert "Invoker" in messages[0]
+    assert "<b>Mode</b>: All Pick · Ranked · Solo" in messages[0]
+    assert refs[0].last_seen_match_id == 1002
+    assert runtime_status is not None
+    assert runtime_status.last_poll_error is None
 
     await engine.dispose()
 

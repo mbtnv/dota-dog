@@ -33,23 +33,26 @@ class ReportingService:
     def previous_period_bounds(
         self, period_type: PeriodType, now: datetime, timezone_name: str
     ) -> tuple[datetime, datetime]:
-        current_start, current_end = self.calculate_period_bounds(period_type, now, timezone_name)
-        if period_type == PeriodType.MONTH:
-            tz = ZoneInfo(timezone_name)
-            current_local_start = current_start.astimezone(tz)
-            previous_local_end = current_local_start
-            if current_local_start.month == 1:
-                previous_local_start = current_local_start.replace(
-                    year=current_local_start.year - 1,
-                    month=12,
-                )
-            else:
-                previous_local_start = current_local_start.replace(
-                    month=current_local_start.month - 1,
-                )
-            return previous_local_start.astimezone(UTC), previous_local_end.astimezone(UTC)
-        duration = current_end - current_start
-        return current_start - duration, current_start
+        current_start, _ = self.calculate_period_bounds(period_type, now, timezone_name)
+        tz = ZoneInfo(timezone_name)
+        current_local_start = current_start.astimezone(tz)
+        previous_local_end = current_local_start
+        if period_type == PeriodType.DAY:
+            previous_local_start = current_local_start - timedelta(days=1)
+        elif period_type == PeriodType.WEEK:
+            previous_local_start = current_local_start - timedelta(weeks=1)
+        else:
+            previous_local_start = self._previous_month_start(current_local_start)
+        return previous_local_start.astimezone(UTC), previous_local_end.astimezone(UTC)
+
+    @staticmethod
+    def _previous_month_start(current_local_start: datetime) -> datetime:
+        if current_local_start.month == 1:
+            return current_local_start.replace(
+                year=current_local_start.year - 1,
+                month=12,
+            )
+        return current_local_start.replace(month=current_local_start.month - 1)
 
     def build_summary(
         self,

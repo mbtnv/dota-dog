@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -42,6 +43,13 @@ class TrackedTopicORM(Base):
     __table_args__ = (
         UniqueConstraint(
             "telegram_chat_id", "telegram_thread_id", name="uq_tracked_topics_chat_thread"
+        ),
+        Index(
+            "uq_tracked_topics_chat_null_thread",
+            "telegram_chat_id",
+            unique=True,
+            postgresql_where=telegram_thread_id.is_(None),
+            sqlite_where=telegram_thread_id.is_(None),
         ),
     )
 
