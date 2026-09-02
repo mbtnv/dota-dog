@@ -69,6 +69,8 @@ cp deploy.env.example /opt/dota-dog/deploy.env
 Важно:
 
 - workflow не хранит production secrets и не подменяет ваш рабочий `.env`;
+- приватный репозиторий обновляется через короткоживущий `GITHUB_TOKEN`, который
+  передаётся `git` только на время `pull` и не сохраняется в checkout;
 - runner будет использовать тот же каталог проекта и тот же compose-файл, что и текущий ручной деплой.
 
 ### 4. Установить self-hosted runner

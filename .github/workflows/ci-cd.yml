@@ -98,7 +98,15 @@ jobs:
           fi
 
       - name: Update repository
-        run: git -C "${DEPLOY_DIR}" pull --ff-only origin "${DEPLOY_BRANCH}"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -C "${DEPLOY_DIR}" \
+            -c http.extraheader="AUTHORIZATION: basic ${auth_header}" \
+            pull --ff-only origin "${DEPLOY_BRANCH}"
 
       - name: Rebuild and restart services
         run: docker compose --project-directory "${DEPLOY_DIR}" -f "${DEPLOY_DIR}/${DEPLOY_COMPOSE_FILE}" up -d --build
