@@ -181,6 +181,10 @@ uv run python -m dota_dog.worker
 
 Полный пример есть в [.env.example](.env.example).
 
+При временной недоступности Telegram бот и worker повторяют запросы с увеличивающейся
+задержкой до 60 секунд вместо завершения процесса. Токен бота маскируется в обычных
+логах и traceback.
+
 ### Telegram через HTTP proxy
 
 Если до `api.telegram.org` с сервера не достучаться напрямую, можно отправить только Telegram-трафик через proxy, не меняя маршрутизацию для OpenDota и Postgres.

@@ -23,7 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 async def _run() -> None:
     settings = load_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, secrets=(settings.bot_token,))
     args = _build_parser().parse_args()
     container = build_container(settings)
     try:

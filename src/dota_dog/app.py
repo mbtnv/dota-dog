@@ -8,13 +8,14 @@ from dota_dog.bootstrap import build_container
 from dota_dog.bot.handlers.common import HandlerDependencies, router
 from dota_dog.infra.db.runtime import check_database_connection
 from dota_dog.infra.telegram.bot import create_bot
+from dota_dog.infra.telegram.retry import retry_telegram_network_errors
 from dota_dog.logging import configure_logging
 from dota_dog.settings import load_settings
 
 
 async def main() -> None:
     settings = load_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, secrets=(settings.bot_token,))
     container = build_container(settings)
     await check_database_connection(container.engine)
     bot = create_bot(settings)
@@ -31,8 +32,19 @@ async def main() -> None:
         poll_interval_minutes=settings.poll_interval_minutes,
         default_timezone=settings.default_timezone,
     )
+
+    async def start_polling() -> None:
+        await dispatcher.start_polling(
+            bot,
+            deps=dispatcher["deps"],
+            close_bot_session=False,
+        )
+
     try:
-        await dispatcher.start_polling(bot, deps=dispatcher["deps"])
+        await retry_telegram_network_errors(
+            start_polling,
+            initial_backoff_seconds=settings.retry_backoff_seconds,
+        )
     finally:
         await container.aclose()
         await bot.session.close()

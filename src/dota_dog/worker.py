@@ -6,6 +6,7 @@ from dota_dog.bootstrap import build_container
 from dota_dog.domain.enums import PeriodType
 from dota_dog.infra.db.runtime import check_database_connection
 from dota_dog.infra.telegram.bot import create_bot
+from dota_dog.infra.telegram.retry import retry_telegram_network_errors
 from dota_dog.infra.telegram.sender import TelegramSender
 from dota_dog.jobs.poll_matches import PollMatchesJob
 from dota_dog.jobs.send_reports import SendReportsJob
@@ -15,7 +16,7 @@ from dota_dog.settings import load_settings
 
 async def _run_forever() -> None:
     settings = load_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, secrets=(settings.bot_token,))
     container = build_container(settings)
     bot = create_bot(settings)
     sender = TelegramSender(
@@ -41,12 +42,19 @@ async def _run_forever() -> None:
         )
         for period_type in PeriodType
     }
+
+    async def run_jobs() -> None:
+        await poll_job.run_once()
+        for period_type, job in report_jobs.items():
+            await job.run_once(period_type)
+
     try:
         await check_database_connection(container.engine)
         while True:
-            await poll_job.run_once()
-            for period_type, job in report_jobs.items():
-                await job.run_once(period_type)
+            await retry_telegram_network_errors(
+                run_jobs,
+                initial_backoff_seconds=settings.retry_backoff_seconds,
+            )
             await asyncio.sleep(settings.poll_interval_minutes * 60)
     finally:
         await container.aclose()
